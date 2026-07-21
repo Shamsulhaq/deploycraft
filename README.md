@@ -10,7 +10,23 @@ Interactive CLI tool for automated web application deployment, configuration, an
 
 ## Installation
 
-### Recommended: pipx (Ubuntu 23.04+, Debian 12+)
+### One-Liner Install (Recommended)
+
+Works on any Linux server — installs globally, available from any directory:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Shamsulhaq/deploycraft/main/install.sh | bash
+```
+
+This installs DeployCraft to `/opt/deploycraft/` and creates a global symlink at `/usr/local/bin/deploycraft`. Works from any user, any directory.
+
+### Uninstall
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Shamsulhaq/deploycraft/main/uninstall.sh | bash
+```
+
+### Alternative: pipx (Ubuntu 23.04+, Debian 12+)
 
 Modern Linux distributions restrict system-wide pip installs. Use `pipx` — it installs DeployCraft in its own virtual environment but makes the command globally available:
 
