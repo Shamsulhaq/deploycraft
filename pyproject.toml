@@ -7,12 +7,12 @@ name = "deploycraft"
 version = "0.1.0"
 description = "Interactive CLI tool for automated web application deployment, configuration, and monitoring on Linux servers."
 readme = "README.md"
-license = "MIT"
+license = {file = "LICENSE"}
 requires-python = ">=3.10"
 authors = [
-    { name = "Shamsul" },
+    { name = "Shamsul", email = "shamsulhaq007@gmail.com" },
 ]
-keywords = ["deployment", "server", "automation", "cli", "devops"]
+keywords = ["deployment", "server", "automation", "cli", "devops", "django", "fastapi", "nextjs", "nginx", "linux"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
@@ -24,7 +24,10 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: System :: Installation/Setup",
     "Topic :: System :: Systems Administration",
+    "Topic :: System :: Monitoring",
 ]
 dependencies = [
     "typer>=0.9.0",
@@ -45,11 +48,15 @@ dev = [
 deploycraft = "deploycraft.cli:app"
 
 [project.urls]
-Homepage = "https://github.com/shamsul/deploycraft"
-Repository = "https://github.com/shamsul/deploycraft"
+Homepage = "https://github.com/Shamsulhaq/deploycraft"
+Repository = "https://github.com/Shamsulhaq/deploycraft"
+Issues = "https://github.com/Shamsulhaq/deploycraft/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["deploycraft"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"templates" = "deploycraft/templates"
 
 [tool.ruff]
 target-version = "py310"
