@@ -72,7 +72,7 @@ $SUDO python3 -m venv "$INSTALL_DIR"
 
 # Install deploycraft into the venv
 $SUDO "$INSTALL_DIR/bin/pip" install --upgrade pip -q
-$SUDO "$INSTALL_DIR/bin/pip" install "git+https://github.com/Shamsulhaq/deploycraft.git" -q
+$SUDO "$INSTALL_DIR/bin/pip" install --no-cache-dir "git+https://github.com/Shamsulhaq/deploycraft.git@main" -q
 
 # Create global symlink in /usr/local/bin (always in PATH for every user)
 $SUDO rm -f "$BIN_LINK"
