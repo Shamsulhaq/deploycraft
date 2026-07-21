@@ -138,11 +138,13 @@ def _deploy_single_project(global_config: GlobalConfig) -> None:
     os_info, pkg_manager = ensure_supported_os()
 
     # --- Step 4: Clone repository ---
-    header("Step 4: Repository Access")
+    header("Step 4: Clone Repository")
 
-    # Test git access first — only prompt for keys/credentials if it fails
-    if not _verify_git_access(git_url):
-        return
+    # For SSH URLs, check key situation before cloning
+    is_ssh_url = git_url.startswith("git@") or git_url.startswith("ssh://")
+    if is_ssh_url:
+        if not _handle_ssh_key_before_clone(git_url):
+            return
 
     # Create release directory
     release_ts = timestamp()
@@ -151,9 +153,8 @@ def _deploy_single_project(global_config: GlobalConfig) -> None:
     ensure_dir(shared_path / "logs")
     ensure_dir(shared_path / "media")
 
-    # Clone
-    if not git.clone_repo(git_url, release_path, branch=branch):
-        error("Failed to clone repository")
+    # Clone — this IS the test. If it works, access is confirmed.
+    if not _clone_with_retry(git_url, release_path, branch):
         return
 
     # --- Step 5: Detect services ---
@@ -572,27 +573,67 @@ def show_logs(project_name: str, lines: int = 50) -> None:
             console.print(result.stdout)
 
 
-def _verify_git_access(git_url: str) -> bool:
-    """Verify git repository is accessible based on URL type.
+def _handle_ssh_key_before_clone(git_url: str) -> bool:
+    """For SSH git URLs, ask user about deploy key before attempting clone.
 
     Flow:
-    - SSH URL (git@...):
-      - Ask user if they've already added the SSH deploy key
-      - If yes → test connection
-      - If no → show public key + instructions → wait for user → test
-      - If test fails → wait for user to fix → re-test (no timers)
-    - HTTPS URL:
-      - Test directly (public repos don't need auth)
-      - If fails → suggest SSH approach
-
-    Always waits for explicit user confirmation. Never uses timers.
+    - Ask: Have you added the SSH deploy key?
+    - If yes → proceed to clone
+    - If no → show key + instructions → wait for user confirmation
 
     Args:
-        git_url: The repository URL.
+        git_url: SSH git URL.
 
     Returns:
-        True if repo is accessible, False if user cancelled.
+        True to proceed with clone, False if user cancelled.
     """
+    from rich.prompt import Confirm
+
+    from deploycraft.services.ssh import (
+        display_public_key_instructions,
+        ensure_keypair_exists,
+    )
+
+    key_added = Confirm.ask(
+        "Have you added the SSH deploy key for this server to your Git provider?",
+        default=False,
+    )
+
+    if key_added:
+        # User says key is already added — proceed to clone
+        return True
+
+    # Key not added — show it and wait
+    public_key = ensure_keypair_exists()
+    if not public_key:
+        error("Failed to generate SSH key.")
+        return False
+
+    display_public_key_instructions(public_key, git_url)
+
+    # Wait for user — no timers
+    Confirm.ask(
+        "[bold]I have added the key to my Git provider. Continue?[/bold]",
+        default=True,
+    )
+    return True
+
+
+def _clone_with_retry(git_url: str, release_path: Path, branch: str) -> bool:
+    """Clone the repository. If it fails, help the user fix it and retry.
+
+    The clone IS the access test. No separate test step needed.
+
+    Args:
+        git_url: Repository URL.
+        release_path: Where to clone to.
+        branch: Branch to clone.
+
+    Returns:
+        True if clone succeeded.
+    """
+    import shutil
+
     from rich.prompt import Confirm
 
     from deploycraft.services.ssh import (
@@ -602,99 +643,37 @@ def _verify_git_access(git_url: str) -> bool:
 
     is_ssh_url = git_url.startswith("git@") or git_url.startswith("ssh://")
 
-    if is_ssh_url:
-        # --- SSH URL: ask about deploy key ---
-        key_added = Confirm.ask(
-            "Have you added the SSH deploy key for this server to your Git provider?",
-            default=False,
-        )
-
-        if not key_added:
-            # Show the public key and instructions
-            public_key = ensure_keypair_exists()
-            if not public_key:
-                error("Failed to generate SSH key.")
-                return False
-
-            display_public_key_instructions(public_key, git_url)
-
-            # Wait for user to add it — no timer, just wait
-            Confirm.ask(
-                "[bold]I have added the key to my Git provider. Continue?[/bold]",
-                default=True,
-            )
-
-        # Test the connection
-        step("Testing repository access...")
-        if git.test_git_access(git_url):
-            success("Repository accessible ✓")
+    while True:
+        if git.clone_repo(git_url, release_path, branch=branch):
             return True
 
-        # Failed — let user fix and retry
-        while True:
-            error("Cannot access the repository.")
-            console.print("  Possible issues:")
-            console.print("  • The deploy key was not added to the correct repository")
-            console.print("  • The repository URL is incorrect")
-            console.print("  • The key needs 'read' permission enabled\n")
+        # Clone failed
+        console.print("\n[red]Clone failed.[/red] Possible issues:")
 
-            # Show the key again in case they need it
-            if Confirm.ask("Show the SSH public key again?", default=True):
+        if is_ssh_url:
+            console.print("  • SSH deploy key not added to the repository")
+            console.print("  • Repository URL is incorrect")
+            console.print("  • Branch does not exist")
+
+            if Confirm.ask("\nShow SSH public key?", default=True):
                 public_key = ensure_keypair_exists()
                 if public_key:
                     display_public_key_instructions(public_key, git_url)
+        else:
+            console.print("  • Repository is private (use SSH URL instead)")
+            console.print("  • URL is incorrect")
+            console.print("  • Repository does not exist")
 
-            if not Confirm.ask("Try again?", default=True):
-                return False
+        if not Confirm.ask("\nRetry clone?", default=True):
+            return False
 
-            # Wait for user to confirm they've fixed it
-            Confirm.ask(
-                "[bold]I have fixed the issue. Test again?[/bold]",
-                default=True,
-            )
+        # Wait for user to confirm they've fixed the issue
+        Confirm.ask("[bold]I have fixed the issue. Try again?[/bold]", default=True)
 
-            step("Testing repository access...")
-            if git.test_git_access(git_url):
-                success("Repository accessible ✓")
-                return True
-
-    else:
-        # --- HTTPS URL: test directly ---
-        step("Testing repository access...")
-        if git.test_git_access(git_url):
-            success("Repository accessible ✓")
-            return True
-
-        # HTTPS failed — repo might be private
-        error("Cannot access the repository.")
-        console.print("  This could mean:")
-        console.print("  • The repository is private (use SSH URL instead)")
-        console.print("  • The URL is incorrect")
-        console.print("  • The repository doesn't exist\n")
-
-        if Confirm.ask("Would you like to use SSH instead? (recommended for private repos)", default=True):
-            ssh_url = _https_to_ssh(git_url)
-            if ssh_url:
-                console.print(f"\n  Converted to SSH: [cyan]{ssh_url}[/cyan]\n")
-                # Recursively handle with SSH flow
-                return _verify_git_access(ssh_url)
-
-        return False
-
-
-def _https_to_ssh(https_url: str) -> str | None:
-    """Convert an HTTPS git URL to SSH format.
-
-    https://github.com/user/repo.git → git@github.com:user/repo.git
-    """
-    import re
-
-    match = re.match(r"https?://([^/]+)/(.+)", https_url)
-    if match:
-        host = match.group(1)
-        path = match.group(2)
-        return f"git@{host}:{path}"
-    return None
+        # Clean up failed clone directory and recreate
+        if release_path.exists():
+            shutil.rmtree(release_path)
+        release_path.mkdir(parents=True, exist_ok=True)
 
 
 def _detect_celery_app(release_path: Path, project_name: str) -> str:
