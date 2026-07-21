@@ -1,0 +1,10 @@
+[Unit]
+Description=DeployCraft Monitoring Timer
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec={{ interval }}min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

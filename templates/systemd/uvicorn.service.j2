@@ -1,0 +1,21 @@
+[Unit]
+Description=Uvicorn daemon for {{ project_name }}
+After=network.target
+
+[Service]
+User={{ user }}
+Group={{ group }}
+WorkingDirectory={{ working_dir }}
+Environment="PATH={{ venv_path }}/bin:/usr/local/bin:/usr/bin"
+EnvironmentFile={{ env_file }}
+ExecStart={{ venv_path }}/bin/uvicorn {{ asgi_app }} \
+    --host 0.0.0.0 \
+    --port {{ port }} \
+    --workers {{ workers }} \
+    --access-log \
+    --log-level info
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

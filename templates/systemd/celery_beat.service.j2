@@ -1,0 +1,19 @@
+[Unit]
+Description=Celery Beat for {{ project_name }}
+After=network.target redis.service
+
+[Service]
+User={{ user }}
+Group={{ group }}
+WorkingDirectory={{ working_dir }}
+Environment="PATH={{ venv_path }}/bin:/usr/local/bin:/usr/bin"
+EnvironmentFile={{ env_file }}
+ExecStart={{ venv_path }}/bin/celery -A {{ celery_app }} beat \
+    --loglevel=info \
+    --schedule={{ shared_dir }}/celerybeat-schedule \
+    --logfile={{ log_dir }}/celery-beat.log
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

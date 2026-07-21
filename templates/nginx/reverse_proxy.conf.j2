@@ -1,0 +1,37 @@
+server {
+    listen 80;
+    server_name {{ domain }};
+
+    location / {
+        proxy_pass http://unix:{{ socket_path }};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_redirect off;
+    }
+
+    location /static/ {
+        alias {{ static_path }}/;
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+    }
+
+    {% if media_path %}
+    location /media/ {
+        alias {{ media_path }}/;
+        expires 7d;
+    }
+    {% endif %}
+
+    # Security headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    client_max_body_size 100M;
+
+    access_log /var/log/nginx/{{ project_name }}-access.log;
+    error_log /var/log/nginx/{{ project_name }}-error.log;
+}

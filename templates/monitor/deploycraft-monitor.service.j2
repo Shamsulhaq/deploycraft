@@ -1,0 +1,9 @@
+[Unit]
+Description=DeployCraft System Monitor
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart={{ python_path }} -m deploycraft.monitor.scheduler --run-check
+StandardOutput=journal
+StandardError=journal
