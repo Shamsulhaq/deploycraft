@@ -137,23 +137,12 @@ def _deploy_single_project(global_config: GlobalConfig) -> None:
     header("Step 3: System Check")
     os_info, pkg_manager = ensure_supported_os()
 
-    # --- Step 3b: SSH Key setup (for SSH git URLs or private repos) ---
-    _ensure_ssh_key_for_git(git_url)
-
     # --- Step 4: Clone repository ---
-    header("Step 4: Clone Repository")
+    header("Step 4: Repository Access")
 
-    # Test git access
-    step("Testing repository access...")
-    if not git.test_git_access(git_url):
-        error("Cannot access the git repository. Check URL and permissions.")
-        if git_url.startswith("git@") or git_url.startswith("ssh://"):
-            warning(
-                "This looks like an SSH URL. Make sure you've added the deploy key "
-                "to your Git provider. Run 'deploycraft ssh-key show' to see your key."
-            )
+    # Test git access first — only prompt for keys/credentials if it fails
+    if not _verify_git_access(git_url):
         return
-    success("Repository accessible")
 
     # Create release directory
     release_ts = timestamp()
@@ -583,73 +572,119 @@ def show_logs(project_name: str, lines: int = 50) -> None:
             console.print(result.stdout)
 
 
-def _ensure_ssh_key_for_git(git_url: str) -> None:
-    """Ensure an SSH key exists and prompt user to add it to Git if needed.
+def _verify_git_access(git_url: str) -> bool:
+    """Verify git repository is accessible. If not, help the user fix it.
 
-    For SSH-based git URLs (git@github.com:...) this is mandatory.
-    For HTTPS URLs it's optional but offered for convenience.
+    Logic:
+    - Test access first (silent)
+    - If access works → done, no prompts needed
+    - If SSH URL fails → generate/show SSH key, ask user to add it, re-test
+    - If HTTPS URL fails → suggest using SSH key or check if repo exists
 
     Args:
         git_url: The repository URL.
+
+    Returns:
+        True if repo is accessible, False if user gave up.
     """
     from rich.prompt import Confirm
 
     from deploycraft.services.ssh import (
         display_public_key_instructions,
         ensure_keypair_exists,
-        key_exists,
-        test_ssh_connection,
     )
 
     is_ssh_url = git_url.startswith("git@") or git_url.startswith("ssh://")
-    is_https_url = git_url.startswith("https://") or git_url.startswith("http://")
+
+    # --- First: silently test if access already works ---
+    step("Testing repository access...")
+    if git.test_git_access(git_url):
+        success("Repository accessible ✓")
+        return True
+
+    # --- Access failed — help the user ---
+    warning("Cannot access the repository.")
 
     if is_ssh_url:
-        # SSH URL — deploy key is required
-        header("Step 3b: SSH Key Setup")
-        if not key_exists():
-            console.print(
-                "[yellow]No SSH deploy key found — generating one now...[/yellow]"
+        # SSH URL failed — need deploy key
+        console.print("\n[yellow]SSH access denied.[/yellow] A deploy key is required.\n")
+
+        # Generate/show the key
+        public_key = ensure_keypair_exists()
+        if public_key:
+            display_public_key_instructions(public_key, git_url)
+
+            # Wait for user to add it
+            Confirm.ask(
+                "[bold]Press Enter after you've added the key to your Git provider[/bold]",
+                default=True,
             )
-            public_key = ensure_keypair_exists()
-            if public_key:
-                display_public_key_instructions(public_key, git_url)
-                Confirm.ask(
-                    "Add the key to your Git provider, then press Enter to continue",
-                    default=True,
-                )
+
+            # Re-test
+            step("Re-testing repository access...")
+            if git.test_git_access(git_url):
+                success("Repository accessible ✓")
+                return True
+            else:
+                error("Still cannot access the repository.")
+                console.print("  Check that:")
+                console.print("  • The key was added to the correct repository")
+                console.print("  • The repository URL is correct")
+                console.print("  • The repository exists")
+                return Confirm.ask("\nRetry?", default=False) and _verify_git_access(git_url)
         else:
-            public_key = ensure_keypair_exists()
-            success("SSH deploy key already exists.")
-            if Confirm.ask("Show the public key?", default=False):
-                if public_key:
-                    display_public_key_instructions(public_key, git_url)
+            error("Failed to generate SSH key.")
+            return False
 
-        # Test the connection
-        test_ssh_connection(git_url)
+    else:
+        # HTTPS URL failed — repo might be private or not exist
+        console.print("\n[yellow]Repository not accessible via HTTPS.[/yellow]")
+        console.print("  This could mean:")
+        console.print("  • The repository is private (needs SSH key)")
+        console.print("  • The URL is incorrect")
+        console.print("  • The repository doesn't exist\n")
 
-    elif is_https_url:
-        # HTTPS URL — key is optional; offer if it already exists
-        if key_exists():
-            # Key exists but not shown yet — offer to show it in case this is a private repo
-            if Confirm.ask(
-                "Show SSH deploy key? (useful if the repo is private and you want to use SSH later)",
-                default=False,
-            ):
+        if Confirm.ask("Switch to SSH and set up a deploy key?", default=True):
+            # Convert HTTPS URL to SSH
+            # https://github.com/user/repo.git → git@github.com:user/repo.git
+            ssh_url = _https_to_ssh(git_url)
+            if ssh_url:
+                console.print(f"  Using SSH URL: [cyan]{ssh_url}[/cyan]")
                 public_key = ensure_keypair_exists()
                 if public_key:
-                    display_public_key_instructions(public_key, git_url)
+                    display_public_key_instructions(public_key, ssh_url)
+                    Confirm.ask(
+                        "[bold]Press Enter after you've added the key[/bold]",
+                        default=True,
+                    )
+                    # Test with SSH URL
+                    step("Testing SSH access...")
+                    if git.test_git_access(ssh_url):
+                        success("Repository accessible via SSH ✓")
+                        return True
+                    else:
+                        error("Still cannot access. Check the key was added correctly.")
+                        return False
+            else:
+                error("Could not convert URL to SSH format.")
+                return False
         else:
-            # No key at all — offer to generate one
-            if Confirm.ask(
-                "Generate an SSH deploy key for this server? "
-                "(optional for HTTPS, required for SSH git URLs)",
-                default=False,
-            ):
-                public_key = ensure_keypair_exists()
-                if public_key:
-                    display_public_key_instructions(public_key, git_url)
-                    Confirm.ask("Press Enter once you've added the key (or skip)", default=True)
+            return False
+
+
+def _https_to_ssh(https_url: str) -> str | None:
+    """Convert an HTTPS git URL to SSH format.
+
+    https://github.com/user/repo.git → git@github.com:user/repo.git
+    """
+    import re
+
+    match = re.match(r"https?://([^/]+)/(.+)", https_url)
+    if match:
+        host = match.group(1)
+        path = match.group(2)
+        return f"git@{host}:{path}"
+    return None
 
 
 def _detect_celery_app(release_path: Path, project_name: str) -> str:
