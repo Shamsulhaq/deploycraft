@@ -33,11 +33,17 @@ def setup_logging(verbose: bool = False) -> logging.Logger:
     """
     level = logging.DEBUG if verbose else logging.INFO
 
-    # Try to create log directory; fall back to user dir
+    # Determine log file location - try system dir first, fall back to user dir
+    log_file = None
     try:
         LOG_DIR.mkdir(parents=True, exist_ok=True)
         log_file = LOG_DIR / "deploycraft.log"
-    except PermissionError:
+        # Test if we can actually write to it
+        log_file.touch(exist_ok=True)
+    except (PermissionError, OSError):
+        log_file = None
+
+    if log_file is None:
         log_dir = Path.home() / ".local" / "share" / "deploycraft" / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
         log_file = log_dir / "deploycraft.log"
@@ -46,12 +52,15 @@ def setup_logging(verbose: bool = False) -> logging.Logger:
     logger.setLevel(level)
 
     # File handler
-    file_handler = logging.FileHandler(log_file)
-    file_handler.setLevel(logging.DEBUG)
-    file_handler.setFormatter(
-        logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-    )
-    logger.addHandler(file_handler)
+    try:
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(
+            logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+        )
+        logger.addHandler(file_handler)
+    except (PermissionError, OSError):
+        pass  # Skip file logging if we can't write anywhere
 
     # Rich console handler (only warnings+ to avoid clutter)
     console_handler = RichHandler(console=console, show_path=False, show_time=False)

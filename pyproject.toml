@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "deploycraft"
-version = "0.1.0"
+version = "0.1.1"
 description = "Interactive CLI tool for automated web application deployment, configuration, and monitoring on Linux servers."
 readme = "README.md"
 license = {file = "LICENSE"}
