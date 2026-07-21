@@ -50,6 +50,16 @@ if ! command -v python3 &> /dev/null; then
     fi
 fi
 
+# Ensure git is installed (needed to install from GitHub)
+if ! command -v git &> /dev/null; then
+    echo -e "${YELLOW}→ Installing git...${NC}"
+    if [[ "$OS" == "ubuntu" || "$OS" == "debian" ]]; then
+        $SUDO apt-get install -y -qq git
+    elif [[ "$OS" == "centos" || "$OS" == "rhel" || "$OS" == "fedora" || "$OS" == "amzn" ]]; then
+        $SUDO dnf install -y git || $SUDO yum install -y git
+    fi
+fi
+
 # Method: Install into /opt and symlink to /usr/local/bin (works globally for ALL users)
 INSTALL_DIR="/opt/deploycraft"
 BIN_LINK="/usr/local/bin/deploycraft"
@@ -62,7 +72,7 @@ $SUDO python3 -m venv "$INSTALL_DIR"
 
 # Install deploycraft into the venv
 $SUDO "$INSTALL_DIR/bin/pip" install --upgrade pip -q
-$SUDO "$INSTALL_DIR/bin/pip" install deploycraft -q
+$SUDO "$INSTALL_DIR/bin/pip" install "git+https://github.com/Shamsulhaq/deploycraft.git" -q
 
 # Create global symlink in /usr/local/bin (always in PATH for every user)
 $SUDO rm -f "$BIN_LINK"
