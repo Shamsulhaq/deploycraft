@@ -596,6 +596,50 @@ def configure(
 
 
 @app.command()
+def ssl(
+    domain: str = typer.Argument("", help="Domain name to install SSL for."),
+    email: str = typer.Option("", "--email", "-e", help="Email for Let's Encrypt notifications."),
+) -> None:
+    """Install SSL certificate (Let's Encrypt) for a domain."""
+    from rich.prompt import Prompt
+
+    from deploycraft.os_detect import ensure_supported_os
+    from deploycraft.services import ssl as ssl_service
+
+    if not domain:
+        # Try to get from current project config
+        project = _resolve_project("")
+        from deploycraft.config import load_project_config
+
+        project_config = load_project_config(project)
+        if project_config and project_config.domain:
+            domain = project_config.domain
+            console.print(f"  Using domain: [cyan]{domain}[/cyan]")
+        else:
+            domain = Prompt.ask("Domain name")
+
+    if not domain:
+        console.print("[red]Domain name is required.[/red]")
+        raise typer.Exit(1)
+
+    if not email:
+        email = Prompt.ask("Email for Let's Encrypt")
+
+    _, pkg_manager = ensure_supported_os()
+
+    # Install certbot
+    ssl_service.install_certbot(pkg_manager)
+
+    # Obtain certificate
+    if ssl_service.obtain_certificate(domain=domain, email=email):
+        ssl_service.setup_auto_renewal()
+        console.print(f"\n[green]✓ SSL installed for {domain}[/green]")
+        console.print("  [dim]Auto-renewal enabled via certbot timer[/dim]")
+    else:
+        console.print(f"[red]✗ SSL installation failed for {domain}[/red]")
+
+
+@app.command()
 def restart(
     project: str = typer.Argument("", help="Project name to restart."),
 ) -> None:
