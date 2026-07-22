@@ -284,12 +284,15 @@ def create_celery_beat_service(
 def enable_service(service_name: str) -> bool:
     """Enable and start a systemd service.
 
+    Runs daemon-reload first to pick up any new/changed service files.
+
     Args:
         service_name: Name of the service (without .service suffix).
 
     Returns:
         True if service was enabled and started successfully.
     """
+    daemon_reload()
     step(f"Enabling service: {service_name}")
     result = run_cmd(["sudo", "systemctl", "enable", "--now", f"{service_name}.service"])
     if result.success:
@@ -363,22 +366,16 @@ def daemon_reload() -> None:
 
 
 def _write_service_file(service_name: str, content: str) -> None:
-    """Write a systemd service file and reload daemon.
+    """Write a systemd service file. Does NOT reload daemon — caller should do that once.
 
     Args:
         service_name: Name for the service file (without .service).
         content: The unit file content.
     """
+    import tempfile
+
     service_path = SYSTEMD_DIR / f"{service_name}.service"
     step(f"Writing service file: {service_path}")
-
-    # Write via sudo tee (since we might not have direct write access)
-    run_cmd(
-        ["sudo", "tee", str(service_path)],
-        env={"CONTENT": content},
-    )
-    # Alternative approach: write to temp then move
-    import tempfile
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".service", delete=False) as f:
         f.write(content)
@@ -388,5 +385,4 @@ def _write_service_file(service_name: str, content: str) -> None:
     run_cmd(["sudo", "chmod", "644", str(service_path)])
     Path(temp_path).unlink(missing_ok=True)
 
-    daemon_reload()
     success(f"Service file created: {service_name}")
