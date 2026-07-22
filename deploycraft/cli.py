@@ -353,6 +353,23 @@ def install_services(
     save_project_config(project_config)
     console.print("[green]✓ Services installed.[/green]")
 
+    # Display credentials
+    if project_config.db_name:
+        from rich.panel import Panel
+        from rich.table import Table
+
+        cred_table = Table(show_header=False, box=None)
+        cred_table.add_column("Key", style="dim")
+        cred_table.add_column("Value", style="yellow")
+        cred_table.add_row("Database", project_config.db_name)
+        cred_table.add_row("User", project_config.db_user)
+        cred_table.add_row("Password", project_config.db_password)
+        cred_table.add_row("Host", "localhost:5432")
+
+        console.print(Panel(cred_table, title="🔑 Database Credentials", border_style="yellow"))
+        console.print("[dim]⚠ Save these credentials! They won't be shown again.[/dim]")
+        console.print(f"[dim]  Connection: postgresql://{project_config.db_user}:{project_config.db_password}@localhost:5432/{project_config.db_name}[/dim]")
+
 
 @app.command()
 def configure(
