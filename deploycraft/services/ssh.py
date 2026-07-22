@@ -67,16 +67,16 @@ def generate_keypair(
     comment: str = "",
     force: bool = False,
 ) -> Optional[Path]:
-    """Generate an RSA SSH keypair.
+    """Generate an SSH keypair by running ssh-keygen with empty prompts.
 
-    Uses 'ssh-keygen -o -t rsa' which generates a key in the standard
-    location (~/.ssh/id_rsa) so SSH/git uses it automatically without
-    any extra configuration.
+    Just runs ssh-keygen and presses enter through everything:
+    - Default location (~/.ssh/id_rsa)
+    - No passphrase
 
     Args:
         key_name: Base name for the key files.
         ssh_dir: SSH directory (defaults to current user's ~/.ssh).
-        comment: Comment to embed in the public key (e.g., hostname).
+        comment: Unused (kept for API compatibility).
         force: If True, overwrite an existing keypair.
 
     Returns:
@@ -93,33 +93,32 @@ def generate_keypair(
     ssh_dir.mkdir(parents=True, exist_ok=True)
     ssh_dir.chmod(0o700)
 
-    # Build comment from hostname if not provided
-    if not comment:
-        import socket
-        comment = f"deploycraft@{socket.gethostname()}"
+    step(f"Generating SSH keypair: {private_key}")
 
-    step(f"Generating RSA SSH keypair: {private_key}")
+    # Run ssh-keygen with empty prompts — just press enter through everything
+    import subprocess
 
-    result = run_cmd([
-        "ssh-keygen",
-        "-o",              # OpenSSH format
-        "-t", "rsa",       # RSA key type
-        "-b", "4096",      # 4096 bits
-        "-C", comment,
-        "-f", str(private_key),
-        "-N", "",          # No passphrase
-        "-q",              # Quiet
-    ])
-
-    if not result.success:
-        error(f"SSH key generation failed: {result.stderr.strip()[:200]}")
+    try:
+        proc = subprocess.run(
+            ["ssh-keygen", "-t", "rsa", "-f", str(private_key)],
+            input="\n\n",  # Empty passphrase + confirm empty passphrase
+            text=True,
+            capture_output=True,
+        )
+        if proc.returncode != 0:
+            error(f"SSH key generation failed: {proc.stderr.strip()[:200]}")
+            return None
+    except FileNotFoundError:
+        error("ssh-keygen not found. Install openssh-client.")
         return None
 
     # Ensure correct permissions
-    private_key.chmod(0o600)
-    public_key.chmod(0o644)
+    if private_key.exists():
+        private_key.chmod(0o600)
+    if public_key.exists():
+        public_key.chmod(0o644)
 
-    success(f"SSH keypair generated: {private_key}")
+    success(f"SSH keypair generated: {public_key}")
     return public_key
 
 

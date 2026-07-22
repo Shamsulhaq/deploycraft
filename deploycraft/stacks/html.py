@@ -73,11 +73,11 @@ class HTMLStack(BaseStack):
         """
         # Check for common subdirectories
         for subdir in ["public", "dist", "www", "html", "site"]:
-            candidate = self.release_path / subdir
+            candidate = self.project_path / subdir
             if candidate.is_dir() and (candidate / "index.html").exists():
                 return candidate
 
-        return self.release_path
+        return self.project_path
 
     def get_log_paths(self) -> list[Path]:
         return [

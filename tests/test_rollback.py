@@ -1,166 +1,124 @@
-"""Tests for deploycraft.deploy.rollback module."""
+"""Tests for deploycraft.deploy.rollback module (git commit-based)."""
 
+import subprocess
 from pathlib import Path
 
 import pytest
 
 from deploycraft.deploy.rollback import (
-    create_release_dir,
-    set_current_symlink,
-    get_current_release,
-    get_previous_release,
-    list_releases,
-    prune_old_releases,
+    get_current_commit,
+    get_current_commit_short,
+    get_commit_log,
+    get_project_path,
+    checkout_commit,
 )
 
 
 @pytest.fixture
-def project_dir(tmp_path):
-    """Create a mock project directory structure."""
-    releases_dir = tmp_path / "releases"
-    releases_dir.mkdir()
-    return tmp_path
+def git_repo(tmp_path):
+    """Create a mock git repository with multiple commits."""
+    repo = tmp_path / "myproject"
+    repo.mkdir()
+
+    # Init repo
+    subprocess.run(["git", "init"], cwd=repo, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=repo, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, capture_output=True)
+
+    # First commit
+    (repo / "file1.txt").write_text("version 1")
+    subprocess.run(["git", "add", "."], cwd=repo, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "Initial commit"], cwd=repo, capture_output=True)
+
+    # Second commit
+    (repo / "file1.txt").write_text("version 2")
+    subprocess.run(["git", "add", "."], cwd=repo, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "Second update"], cwd=repo, capture_output=True)
+
+    # Third commit
+    (repo / "file1.txt").write_text("version 3")
+    subprocess.run(["git", "add", "."], cwd=repo, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "Third update"], cwd=repo, capture_output=True)
+
+    return repo
 
 
-class TestCreateReleaseDir:
-    def test_creates_directory(self, project_dir):
-        release = create_release_dir(str(project_dir), "20260721_140000")
-        assert release.exists()
-        assert release.is_dir()
-        assert release.name == "20260721_140000"
-
-    def test_creates_under_releases(self, project_dir):
-        release = create_release_dir(str(project_dir), "20260721_150000")
-        assert release.parent.name == "releases"
-
-    def test_idempotent(self, project_dir):
-        release1 = create_release_dir(str(project_dir), "20260721_140000")
-        release2 = create_release_dir(str(project_dir), "20260721_140000")
-        assert release1 == release2
+class TestGetProjectPath:
+    def test_returns_path(self):
+        path = get_project_path("/var/www/myproject")
+        assert path == Path("/var/www/myproject")
 
 
-class TestSetCurrentSymlink:
-    def test_creates_symlink(self, project_dir):
-        create_release_dir(str(project_dir), "20260721_140000")
-        result = set_current_symlink(str(project_dir), "20260721_140000")
+class TestGetCurrentCommit:
+    def test_returns_commit_hash(self, git_repo):
+        commit = get_current_commit(git_repo)
+        assert commit is not None
+        assert len(commit) == 40  # Full SHA
 
+    def test_returns_none_for_non_git(self, tmp_path):
+        commit = get_current_commit(tmp_path)
+        assert commit is None
+
+
+class TestGetCurrentCommitShort:
+    def test_returns_short_hash(self, git_repo):
+        short = get_current_commit_short(git_repo)
+        assert short is not None
+        assert len(short) >= 7
+
+
+class TestGetCommitLog:
+    def test_returns_commits(self, git_repo):
+        commits = get_commit_log(git_repo, count=10)
+        assert len(commits) == 3
+        assert commits[0]["message"] == "Third update"
+        assert commits[1]["message"] == "Second update"
+        assert commits[2]["message"] == "Initial commit"
+
+    def test_each_commit_has_fields(self, git_repo):
+        commits = get_commit_log(git_repo)
+        for commit in commits:
+            assert "hash" in commit
+            assert "short_hash" in commit
+            assert "message" in commit
+            assert "date" in commit
+            assert len(commit["hash"]) == 40
+
+    def test_respects_count(self, git_repo):
+        commits = get_commit_log(git_repo, count=2)
+        assert len(commits) == 2
+
+    def test_empty_for_non_git(self, tmp_path):
+        commits = get_commit_log(tmp_path)
+        assert commits == []
+
+
+class TestCheckoutCommit:
+    def test_checkout_previous(self, git_repo):
+        commits = get_commit_log(git_repo)
+        previous = commits[1]["hash"]
+
+        result = checkout_commit(git_repo, previous)
         assert result is True
-        current = project_dir / "current"
-        assert current.is_symlink()
-        assert current.resolve().name == "20260721_140000"
 
-    def test_switches_symlink(self, project_dir):
-        create_release_dir(str(project_dir), "20260721_140000")
-        create_release_dir(str(project_dir), "20260721_150000")
+        # Verify we're on that commit
+        current = get_current_commit(git_repo)
+        assert current == previous
 
-        set_current_symlink(str(project_dir), "20260721_140000")
-        set_current_symlink(str(project_dir), "20260721_150000")
+        # Verify file content matches
+        content = (git_repo / "file1.txt").read_text()
+        assert content == "version 2"
 
-        current = project_dir / "current"
-        assert current.resolve().name == "20260721_150000"
+    def test_checkout_first_commit(self, git_repo):
+        commits = get_commit_log(git_repo)
+        first = commits[2]["hash"]
 
-    def test_fails_for_nonexistent_release(self, project_dir):
-        result = set_current_symlink(str(project_dir), "nonexistent")
+        result = checkout_commit(git_repo, first)
+        assert result is True
+
+        content = (git_repo / "file1.txt").read_text()
+        assert content == "version 1"
+
+    def test_checkout_invalid_hash(self, git_repo):
+        result = checkout_commit(git_repo, "0000000000000000000000000000000000000000")
         assert result is False
-
-
-class TestGetCurrentRelease:
-    def test_returns_current(self, project_dir):
-        create_release_dir(str(project_dir), "20260721_140000")
-        set_current_symlink(str(project_dir), "20260721_140000")
-
-        assert get_current_release(str(project_dir)) == "20260721_140000"
-
-    def test_returns_none_when_no_symlink(self, project_dir):
-        assert get_current_release(str(project_dir)) is None
-
-
-class TestGetPreviousRelease:
-    def test_returns_previous(self, project_dir):
-        create_release_dir(str(project_dir), "20260721_140000")
-        create_release_dir(str(project_dir), "20260721_150000")
-        set_current_symlink(str(project_dir), "20260721_150000")
-
-        assert get_previous_release(str(project_dir)) == "20260721_140000"
-
-    def test_returns_none_when_only_one_release(self, project_dir):
-        create_release_dir(str(project_dir), "20260721_140000")
-        set_current_symlink(str(project_dir), "20260721_140000")
-
-        assert get_previous_release(str(project_dir)) is None
-
-    def test_returns_none_when_no_releases(self, project_dir):
-        assert get_previous_release(str(project_dir)) is None
-
-
-class TestListReleases:
-    def test_lists_in_order(self, project_dir):
-        for ts in ["20260721_160000", "20260721_140000", "20260721_150000"]:
-            create_release_dir(str(project_dir), ts)
-
-        releases = list_releases(str(project_dir))
-        assert releases == ["20260721_140000", "20260721_150000", "20260721_160000"]
-
-    def test_empty_when_no_releases(self, project_dir):
-        releases = list_releases(str(project_dir))
-        assert releases == []
-
-    def test_ignores_hidden_dirs(self, project_dir):
-        create_release_dir(str(project_dir), "20260721_140000")
-        (project_dir / "releases" / ".hidden").mkdir()
-
-        releases = list_releases(str(project_dir))
-        assert releases == ["20260721_140000"]
-
-
-class TestPruneOldReleases:
-    def test_prunes_oldest(self, project_dir):
-        timestamps = [
-            "20260721_100000",
-            "20260721_110000",
-            "20260721_120000",
-            "20260721_130000",
-            "20260721_140000",
-            "20260721_150000",
-            "20260721_160000",
-        ]
-        for ts in timestamps:
-            create_release_dir(str(project_dir), ts)
-
-        # Set current to latest
-        set_current_symlink(str(project_dir), "20260721_160000")
-
-        # Keep only 3
-        prune_old_releases(str(project_dir), max_releases=3)
-
-        remaining = list_releases(str(project_dir))
-        assert len(remaining) <= 3
-        # Latest should still be there
-        assert "20260721_160000" in remaining
-
-    def test_no_prune_when_under_limit(self, project_dir):
-        for ts in ["20260721_140000", "20260721_150000"]:
-            create_release_dir(str(project_dir), ts)
-
-        prune_old_releases(str(project_dir), max_releases=5)
-
-        remaining = list_releases(str(project_dir))
-        assert len(remaining) == 2
-
-    def test_never_prunes_current(self, project_dir):
-        timestamps = [
-            "20260721_100000",
-            "20260721_110000",
-            "20260721_120000",
-            "20260721_130000",
-        ]
-        for ts in timestamps:
-            create_release_dir(str(project_dir), ts)
-
-        # Set current to the OLDEST (unusual but should be protected)
-        set_current_symlink(str(project_dir), "20260721_100000")
-
-        prune_old_releases(str(project_dir), max_releases=2)
-
-        remaining = list_releases(str(project_dir))
-        assert "20260721_100000" in remaining

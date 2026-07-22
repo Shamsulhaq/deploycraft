@@ -234,18 +234,18 @@ def load_env_from_file(path: Path) -> dict[str, str]:
     return env_vars
 
 
-def symlink_env_to_release(project_name: str, release_path: Path) -> bool:
+def symlink_env_to_project(project_name: str, project_path: Path) -> bool:
     """Create a symlink from the release directory to the secure .env file.
 
     Args:
         project_name: Name of the project.
-        release_path: Path to the current release directory.
+        project_path: Path to the current release directory.
 
     Returns:
         True if symlink was created successfully.
     """
     env_source = get_env_file_path(project_name)
-    env_target = release_path / ".env"
+    env_target = project_path / ".env"
 
     if not env_source.exists():
         warning(f"No .env file found for {project_name}")

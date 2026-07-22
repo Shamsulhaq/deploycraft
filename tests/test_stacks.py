@@ -104,7 +104,7 @@ class TestDjangoDetection:
             project_config=project,
             os_info=os_info,
             package_manager=PackageManager(os_info),
-            release_path=django_project,
+            project_path=django_project,
             shared_path=django_project / "shared",
             env_file_path=django_project / ".env",
         )
@@ -129,7 +129,7 @@ class TestDjangoDetection:
             project_config=project,
             os_info=os_info,
             package_manager=PackageManager(os_info),
-            release_path=minimal_django,
+            project_path=minimal_django,
             shared_path=minimal_django / "shared",
             env_file_path=minimal_django / ".env",
         )
@@ -171,7 +171,7 @@ class TestNextJSDetection:
             project_config=project,
             os_info=os_info,
             package_manager=PackageManager(os_info),
-            release_path=nextjs_project,
+            project_path=nextjs_project,
             shared_path=nextjs_project / "shared",
             env_file_path=nextjs_project / ".env",
         )
@@ -200,7 +200,7 @@ class TestHTMLDetection:
             project_config=project,
             os_info=os_info,
             package_manager=PackageManager(os_info),
-            release_path=tmp_path,
+            project_path=tmp_path,
             shared_path=tmp_path / "shared",
             env_file_path=tmp_path / ".env",
         )

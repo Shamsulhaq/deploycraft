@@ -91,7 +91,7 @@ class FastAPIStack(BaseStack):
         """Create virtualenv and install Python dependencies."""
         step("Creating Python virtual environment...")
 
-        venv_path = self.release_path / "venv"
+        venv_path = self.project_path / "venv"
 
         # Create virtualenv
         result = run_cmd(["python3", "-m", "venv", str(venv_path)])
@@ -105,16 +105,16 @@ class FastAPIStack(BaseStack):
         run_cmd([pip, "install", "--upgrade", "pip", "setuptools", "wheel"])
 
         # Install from requirements.txt
-        req_file = self.release_path / "requirements.txt"
+        req_file = self.project_path / "requirements.txt"
         if req_file.exists():
             step("Installing from requirements.txt...")
             result = run_cmd([pip, "install", "-r", str(req_file)], timeout=300)
             if not result.success:
                 error(f"pip install failed: {result.stderr.strip()[:300]}")
                 return False
-        elif (self.release_path / "pyproject.toml").exists():
+        elif (self.project_path / "pyproject.toml").exists():
             step("Installing from pyproject.toml...")
-            result = run_cmd([pip, "install", "."], cwd=self.release_path, timeout=300)
+            result = run_cmd([pip, "install", "."], cwd=self.project_path, timeout=300)
             if not result.success:
                 error(f"pip install failed: {result.stderr.strip()[:300]}")
                 return False
@@ -136,18 +136,18 @@ class FastAPIStack(BaseStack):
 
     def run_migrations(self) -> bool:
         """Run Alembic migrations if present."""
-        alembic_ini = self.release_path / "alembic.ini"
+        alembic_ini = self.project_path / "alembic.ini"
         if not alembic_ini.exists():
             step("No Alembic migrations found, skipping")
             return True
 
         step("Running Alembic migrations...")
-        str(self.release_path / "venv" / "bin" / "python")
-        alembic = str(self.release_path / "venv" / "bin" / "alembic")
+        str(self.project_path / "venv" / "bin" / "python")
+        alembic = str(self.project_path / "venv" / "bin" / "alembic")
 
         result = run_cmd(
             [alembic, "upgrade", "head"],
-            cwd=self.release_path,
+            cwd=self.project_path,
         )
 
         if result.success:
@@ -159,7 +159,7 @@ class FastAPIStack(BaseStack):
 
     def get_process_command(self) -> list[str]:
         """Get the Uvicorn command."""
-        venv_path = self.release_path / "venv"
+        venv_path = self.project_path / "venv"
         asgi_app = self._detect_asgi_app()
         return [
             str(venv_path / "bin" / "uvicorn"),
@@ -173,12 +173,12 @@ class FastAPIStack(BaseStack):
         """Get the systemd service name and create the service file."""
         service_name = f"{self.project.name}-uvicorn"
 
-        venv_path = self.release_path / "venv"
+        venv_path = self.project_path / "venv"
         asgi_app = self._detect_asgi_app()
 
         systemd.create_uvicorn_service(
             project_name=self.project.name,
-            working_dir=self.release_path,
+            working_dir=self.project_path,
             venv_path=venv_path,
             asgi_app=asgi_app,
             env_file=self.context.env_file_path,
@@ -215,19 +215,19 @@ class FastAPIStack(BaseStack):
         ]
 
         for file_path, module_path in candidates:
-            if (self.release_path / file_path).exists():
+            if (self.project_path / file_path).exists():
                 # Verify it actually contains a FastAPI app
-                content = (self.release_path / file_path).read_text()
+                content = (self.project_path / file_path).read_text()
                 if "FastAPI" in content or "fastapi" in content:
                     return module_path
 
         # Search for FastAPI() instantiation
-        for py_file in self.release_path.rglob("*.py"):
+        for py_file in self.project_path.rglob("*.py"):
             try:
                 content = py_file.read_text()
                 if "FastAPI()" in content or "= FastAPI(" in content:
                     # Convert file path to module path
-                    rel = py_file.relative_to(self.release_path)
+                    rel = py_file.relative_to(self.project_path)
                     module = str(rel).replace("/", ".").replace(".py", "")
                     return f"{module}:app"
             except (PermissionError, OSError):

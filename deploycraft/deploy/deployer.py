@@ -25,10 +25,10 @@ from deploycraft.deploy.env_manager import (
     collect_env_vars_interactive,
     create_env_file,
     get_env_file_path,
-    symlink_env_to_release,
+    symlink_env_to_project,
 )
 from deploycraft.deploy.health_check import run_health_check
-from deploycraft.deploy.rollback import create_release_dir, prune_old_releases, set_current_symlink
+from deploycraft.deploy.rollback import get_current_commit
 from deploycraft.os_detect import ensure_supported_os
 from deploycraft.services import git, nginx, node, pm2, postgres, redis, ssl, systemd
 from deploycraft.stacks.base import (
@@ -44,7 +44,6 @@ from deploycraft.utils import (
     human_timestamp,
     step,
     success,
-    timestamp,
     warning,
 )
 
@@ -146,15 +145,14 @@ def _deploy_single_project(global_config: GlobalConfig) -> None:
         if not _handle_ssh_key_before_clone(git_url):
             return
 
-    # Create release directory
-    release_ts = timestamp()
-    release_path = create_release_dir(base_path, release_ts)
-    shared_path = ensure_dir(Path(base_path) / "shared")
+    # Project directory — single directory, no releases/ structure
+    project_path = Path(base_path)
+    shared_path = ensure_dir(project_path / "shared")
     ensure_dir(shared_path / "logs")
     ensure_dir(shared_path / "media")
 
-    # Clone — this IS the test. If it works, access is confirmed.
-    if not _clone_with_retry(git_url, release_path, branch):
+    # Clone directly into the project path (full clone for git history)
+    if not _clone_with_retry(git_url, project_path, branch):
         return
 
     # --- Step 5: Detect services ---
@@ -182,14 +180,14 @@ def _deploy_single_project(global_config: GlobalConfig) -> None:
         project_config=project_config,
         os_info=os_info,
         package_manager=pkg_manager,
-        release_path=release_path,
+        project_path=project_path,
         shared_path=shared_path,
         env_file_path=env_file_path,
         domain=domain,
     )
 
     stack = stack_class(context)
-    detected = stack.detect_services(release_path)
+    detected = stack.detect_services(project_path)
 
     # Show detected services
     services = detected.summary()
@@ -262,7 +260,7 @@ def _deploy_single_project(global_config: GlobalConfig) -> None:
     project_config.env_vars = env_vars
 
     # Symlink .env into release
-    symlink_env_to_release(project_name, release_path)
+    symlink_env_to_project(project_name, project_path)
 
     # --- Step 8: Install app dependencies ---
     header("Step 8: Install Dependencies")
@@ -297,11 +295,11 @@ def _deploy_single_project(global_config: GlobalConfig) -> None:
     if selected_stack_type in (StackType.DJANGO, StackType.FASTAPI):
         # Celery services
         if detected.needs_celery:
-            celery_app = _detect_celery_app(release_path, project_name)
-            venv_path = release_path / "venv"
+            celery_app = _detect_celery_app(project_path, project_name)
+            venv_path = project_path / "venv"
             systemd.create_celery_worker_service(
                 project_name=project_name,
-                working_dir=release_path,
+                working_dir=project_path,
                 venv_path=venv_path,
                 celery_app=celery_app,
                 env_file=env_file_path,
@@ -310,11 +308,11 @@ def _deploy_single_project(global_config: GlobalConfig) -> None:
             project_config.services.append("celery")
 
         if detected.needs_celery_beat:
-            celery_app = _detect_celery_app(release_path, project_name)
-            venv_path = release_path / "venv"
+            celery_app = _detect_celery_app(project_path, project_name)
+            venv_path = project_path / "venv"
             systemd.create_celery_beat_service(
                 project_name=project_name,
-                working_dir=release_path,
+                working_dir=project_path,
                 venv_path=venv_path,
                 celery_app=celery_app,
                 env_file=env_file_path,
@@ -331,7 +329,7 @@ def _deploy_single_project(global_config: GlobalConfig) -> None:
         port = 3000
         pm2.start_app(
             project_name=project_name,
-            working_dir=release_path,
+            working_dir=project_path,
             script="npm",
             args="start",
             port=port,
@@ -343,11 +341,11 @@ def _deploy_single_project(global_config: GlobalConfig) -> None:
 
     if selected_stack_type in (StackType.REACT_VITE, StackType.REACT, StackType.HTML):
         # Static site
-        document_root = str(release_path / "build")  # Will be adjusted per stack
+        document_root = str(project_path / "build")  # Will be adjusted per stack
         if selected_stack_type == StackType.REACT_VITE:
-            document_root = str(release_path / "dist")
+            document_root = str(project_path / "dist")
         elif selected_stack_type == StackType.HTML:
-            document_root = str(release_path)
+            document_root = str(project_path)
 
         nginx.create_static_site_config(
             project_name=project_name,
@@ -367,7 +365,7 @@ def _deploy_single_project(global_config: GlobalConfig) -> None:
         nginx.create_reverse_proxy_config(
             project_name=project_name,
             domain=domain,
-            static_path=str(release_path / "staticfiles"),
+            static_path=str(project_path / "staticfiles"),
             media_path=str(shared_path / "media"),
             use_socket=True,
         )
@@ -381,25 +379,19 @@ def _deploy_single_project(global_config: GlobalConfig) -> None:
         ssl.obtain_certificate(domain=domain, email=admin_email)
         ssl.setup_auto_renewal()
 
-    # --- Step 15: Set current symlink ---
-    set_current_symlink(base_path, release_ts)
-
-    # --- Step 16: Update project config ---
-    project_config.current_release = release_ts
-    project_config.releases.append(release_ts)
+    # --- Step 15: Update project config ---
+    current_commit = get_current_commit(project_path) or ""
+    project_config.current_release = current_commit
     project_config.last_deployed = human_timestamp()
     project_config.created_at = project_config.created_at or human_timestamp()
     save_project_config(project_config)
 
-    # --- Step 17: Health check ---
+    # --- Step 16: Health check ---
     header("Step 14: Health Check")
     health_ok = run_health_check(domain)
 
-    # --- Step 18: Report ---
+    # --- Step 17: Report ---
     _display_deploy_report(project_config, db_info, superuser_info, health_ok)
-
-    # Prune old releases
-    prune_old_releases(base_path, max_releases=global_config.max_releases)
 
 
 def run_redeploy(project_name: str) -> None:
@@ -417,18 +409,17 @@ def run_redeploy(project_name: str) -> None:
 
     os_info, pkg_manager = ensure_supported_os()
 
-    # Create new release
-    release_ts = timestamp()
-    release_path = create_release_dir(project.base_path, release_ts)
-    shared_path = Path(project.base_path) / "shared"
+    project_path = Path(project.base_path)
+    shared_path = project_path / "shared"
 
-    # Clone fresh
-    if not git.clone_repo(project.git_url, release_path, branch=project.branch):
-        error("Failed to clone repository")
+    # Pull latest code
+    step("Pulling latest code...")
+    if not git.fetch_latest(project_path, branch=project.branch):
+        error("Failed to pull latest code")
         return
 
     # Symlink .env
-    symlink_env_to_release(project_name, release_path)
+    symlink_env_to_project(project_name, project_path)
 
     # Get stack and rebuild
     stack_type = StackType(project.stack)
@@ -442,7 +433,7 @@ def run_redeploy(project_name: str) -> None:
         project_config=project,
         os_info=os_info,
         package_manager=pkg_manager,
-        release_path=release_path,
+        project_path=project_path,
         shared_path=shared_path,
         env_file_path=env_file_path,
         domain=project.domain,
@@ -463,9 +454,6 @@ def run_redeploy(project_name: str) -> None:
     step("Running migrations...")
     stack.run_migrations()
 
-    # Switch symlink
-    set_current_symlink(project.base_path, release_ts)
-
     # Restart services
     step("Restarting services...")
     service_name = stack.get_service_name()
@@ -478,18 +466,14 @@ def run_redeploy(project_name: str) -> None:
     elif stack_type == StackType.NEXTJS:
         pm2.restart_app(project_name)
 
-    # Update config
-    project.current_release = release_ts
-    project.releases.append(release_ts)
+    # Update config with current commit
+    current_commit = get_current_commit(project_path) or ""
+    project.current_release = current_commit
     project.last_deployed = human_timestamp()
     save_project_config(project)
 
     # Health check
     health_ok = run_health_check(project.domain)
-
-    # Prune old releases
-    global_config = load_global_config()
-    prune_old_releases(project.base_path, max_releases=global_config.max_releases)
 
     if health_ok:
         success(f"Redeployment of '{project_name}' complete!")
@@ -619,14 +603,14 @@ def _handle_ssh_key_before_clone(git_url: str) -> bool:
     return True
 
 
-def _clone_with_retry(git_url: str, release_path: Path, branch: str) -> bool:
+def _clone_with_retry(git_url: str, project_path: Path, branch: str) -> bool:
     """Clone the repository. If it fails, help the user fix it and retry.
 
     The clone IS the access test. No separate test step needed.
 
     Args:
         git_url: Repository URL.
-        release_path: Where to clone to.
+        project_path: Where to clone to.
         branch: Branch to clone.
 
     Returns:
@@ -644,7 +628,7 @@ def _clone_with_retry(git_url: str, release_path: Path, branch: str) -> bool:
     is_ssh_url = git_url.startswith("git@") or git_url.startswith("ssh://")
 
     while True:
-        if git.clone_repo(git_url, release_path, branch=branch):
+        if git.clone_repo(git_url, project_path, branch=branch):
             return True
 
         # Clone failed
@@ -671,23 +655,23 @@ def _clone_with_retry(git_url: str, release_path: Path, branch: str) -> bool:
         Confirm.ask("[bold]I have fixed the issue. Try again?[/bold]", default=True)
 
         # Clean up failed clone directory and recreate
-        if release_path.exists():
-            shutil.rmtree(release_path)
-        release_path.mkdir(parents=True, exist_ok=True)
+        if project_path.exists():
+            shutil.rmtree(project_path)
+        project_path.mkdir(parents=True, exist_ok=True)
 
 
-def _detect_celery_app(release_path: Path, project_name: str) -> str:
+def _detect_celery_app(project_path: Path, project_name: str) -> str:
     """Try to detect the Celery app module name from the project.
 
     Args:
-        release_path: Path to the project source.
+        project_path: Path to the project source.
         project_name: Project name as fallback.
 
     Returns:
         Celery app string (e.g., "myproject.celery:app").
     """
     # Look for celery.py in common locations
-    for candidate in release_path.iterdir():
+    for candidate in project_path.iterdir():
         if candidate.is_dir():
             celery_file = candidate / "celery.py"
             if celery_file.exists():

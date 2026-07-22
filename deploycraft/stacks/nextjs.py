@@ -86,10 +86,10 @@ class NextJSStack(BaseStack):
         else:
             cmd = ["npm", "ci"]
             # Fallback to npm install if no lockfile
-            if not (self.release_path / "package-lock.json").exists():
+            if not (self.project_path / "package-lock.json").exists():
                 cmd = ["npm", "install"]
 
-        result = run_cmd(cmd, cwd=self.release_path, timeout=300)
+        result = run_cmd(cmd, cwd=self.project_path, timeout=300)
         if not result.success:
             error(f"Dependency installation failed: {result.stderr.strip()[:300]}")
             return False
@@ -110,13 +110,13 @@ class NextJSStack(BaseStack):
         else:
             cmd = ["npm", "run", "build"]
 
-        result = run_cmd(cmd, cwd=self.release_path, timeout=600)
+        result = run_cmd(cmd, cwd=self.project_path, timeout=600)
         if not result.success:
             error(f"Build failed: {result.stderr.strip()[:300]}")
             return False
 
         # Verify .next directory was created
-        next_dir = self.release_path / ".next"
+        next_dir = self.project_path / ".next"
         if not next_dir.exists():
             error("Build completed but .next directory not found")
             return False
@@ -151,7 +151,7 @@ class NextJSStack(BaseStack):
 
         return pm2.start_app(
             project_name=self.project.name,
-            working_dir=self.release_path,
+            working_dir=self.project_path,
             script="npm",
             args="start",
             port=port,
@@ -165,8 +165,8 @@ class NextJSStack(BaseStack):
         Returns:
             "npm", "yarn", or "pnpm"
         """
-        if (self.release_path / "pnpm-lock.yaml").exists():
+        if (self.project_path / "pnpm-lock.yaml").exists():
             return "pnpm"
-        if (self.release_path / "yarn.lock").exists():
+        if (self.project_path / "yarn.lock").exists():
             return "yarn"
         return "npm"

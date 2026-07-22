@@ -93,19 +93,20 @@ class TestSecretKeyGeneration:
 
 class TestDatabaseNameGeneration:
     def test_simple_name(self):
-        assert generate_db_name("myproject") == "myproject"
+        assert generate_db_name("myproject") == "myproject_db"
 
     def test_dashes_to_underscores(self):
-        assert generate_db_name("my-project") == "my_project"
+        assert generate_db_name("my-project") == "my_project_db"
 
     def test_spaces_to_underscores(self):
-        assert generate_db_name("my project") == "my_project"
+        assert generate_db_name("my project") == "my_project_db"
 
     def test_special_chars_removed(self):
-        assert generate_db_name("my@project!") == "myproject"
+        assert generate_db_name("my@project!") == "myproject_db"
 
     def test_starts_with_number(self):
         assert generate_db_name("123project").startswith("db_")
+        assert generate_db_name("123project").endswith("_db")
 
     def test_max_length(self):
         long_name = "a" * 100
@@ -119,13 +120,14 @@ class TestDatabaseNameGeneration:
 
 class TestDatabaseUserGeneration:
     def test_simple_name(self):
-        assert generate_db_user("myproject") == "myproject"
+        assert generate_db_user("myproject") == "myproject_user"
 
     def test_dashes_to_underscores(self):
-        assert generate_db_user("my-app") == "my_app"
+        assert generate_db_user("my-app") == "my_app_user"
 
     def test_starts_with_number(self):
         assert generate_db_user("123app").startswith("u_")
+        assert generate_db_user("123app").endswith("_user")
 
 
 class TestTimestamps:

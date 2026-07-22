@@ -17,9 +17,11 @@ def clone_repo(
     git_url: str,
     target_path: Path,
     branch: str = "main",
-    depth: Optional[int] = 1,
+    depth: Optional[int] = None,
 ) -> bool:
     """Clone a git repository to the target path.
+
+    Full clone by default (no --depth) so git history is available for rollback.
 
     Args:
         git_url: The HTTPS or SSH URL of the repository.

@@ -116,7 +116,7 @@ class DjangoStack(BaseStack):
         """Create virtualenv and install Python dependencies."""
         step("Creating Python virtual environment...")
 
-        venv_path = self.release_path / "venv"
+        venv_path = self.project_path / "venv"
 
         # Create virtualenv
         result = run_cmd(["python3", "-m", "venv", str(venv_path)])
@@ -130,16 +130,16 @@ class DjangoStack(BaseStack):
         run_cmd([pip, "install", "--upgrade", "pip", "setuptools", "wheel"])
 
         # Install from requirements.txt
-        req_file = self.release_path / "requirements.txt"
+        req_file = self.project_path / "requirements.txt"
         if req_file.exists():
             step("Installing from requirements.txt...")
             result = run_cmd([pip, "install", "-r", str(req_file)], timeout=300)
             if not result.success:
                 error(f"pip install failed: {result.stderr.strip()[:300]}")
                 return False
-        elif (self.release_path / "pyproject.toml").exists():
+        elif (self.project_path / "pyproject.toml").exists():
             step("Installing from pyproject.toml...")
-            result = run_cmd([pip, "install", "."], cwd=self.release_path, timeout=300)
+            result = run_cmd([pip, "install", "."], cwd=self.project_path, timeout=300)
             if not result.success:
                 error(f"pip install failed: {result.stderr.strip()[:300]}")
                 return False
@@ -157,7 +157,7 @@ class DjangoStack(BaseStack):
         """Run collectstatic for Django."""
         step("Running collectstatic...")
 
-        python = str(self.release_path / "venv" / "bin" / "python")
+        python = str(self.project_path / "venv" / "bin" / "python")
         manage_py = self._find_manage_py()
 
         if not manage_py:
@@ -166,7 +166,7 @@ class DjangoStack(BaseStack):
 
         result = run_cmd(
             [python, str(manage_py), "collectstatic", "--noinput"],
-            cwd=self.release_path,
+            cwd=self.project_path,
             env={"DJANGO_SETTINGS_MODULE": self._detect_settings_module()},
         )
 
@@ -182,7 +182,7 @@ class DjangoStack(BaseStack):
         """Run Django database migrations."""
         step("Running migrations...")
 
-        python = str(self.release_path / "venv" / "bin" / "python")
+        python = str(self.project_path / "venv" / "bin" / "python")
         manage_py = self._find_manage_py()
 
         if not manage_py:
@@ -191,7 +191,7 @@ class DjangoStack(BaseStack):
 
         result = run_cmd(
             [python, str(manage_py), "migrate", "--noinput"],
-            cwd=self.release_path,
+            cwd=self.project_path,
         )
 
         if result.success:
@@ -206,7 +206,7 @@ class DjangoStack(BaseStack):
         if not Confirm.ask("Create Django superuser?", default=True):
             return None
 
-        python = str(self.release_path / "venv" / "bin" / "python")
+        python = str(self.project_path / "venv" / "bin" / "python")
         manage_py = self._find_manage_py()
 
         if not manage_py:
@@ -221,7 +221,7 @@ class DjangoStack(BaseStack):
         result = run_cmd(
             [python, str(manage_py), "createsuperuser", "--noinput",
              "--username", username, "--email", email],
-            cwd=self.release_path,
+            cwd=self.project_path,
             env={
                 "DJANGO_SUPERUSER_PASSWORD": password,
             },
@@ -243,7 +243,7 @@ class DjangoStack(BaseStack):
 
     def get_process_command(self) -> list[str]:
         """Get the Gunicorn command for this Django project."""
-        venv_path = self.release_path / "venv"
+        venv_path = self.project_path / "venv"
         wsgi_app = self._detect_wsgi_app()
         return [
             str(venv_path / "bin" / "gunicorn"),
@@ -257,12 +257,12 @@ class DjangoStack(BaseStack):
         service_name = f"{self.project.name}-gunicorn"
 
         # Create the service file
-        venv_path = self.release_path / "venv"
+        venv_path = self.project_path / "venv"
         wsgi_app = self._detect_wsgi_app()
 
         systemd.create_gunicorn_service(
             project_name=self.project.name,
-            working_dir=self.release_path,
+            working_dir=self.project_path,
             venv_path=venv_path,
             wsgi_app=wsgi_app,
             env_file=self.context.env_file_path,
@@ -290,12 +290,12 @@ class DjangoStack(BaseStack):
     def _find_manage_py(self) -> Optional[Path]:
         """Find manage.py in the project."""
         # Direct in release root
-        manage = self.release_path / "manage.py"
+        manage = self.project_path / "manage.py"
         if manage.exists():
             return manage
 
         # One level deep
-        for child in self.release_path.iterdir():
+        for child in self.project_path.iterdir():
             if child.is_dir():
                 manage = child / "manage.py"
                 if manage.exists():
@@ -309,7 +309,7 @@ class DjangoStack(BaseStack):
         Looks for wsgi.py in the project to determine the module path.
         """
         # Look for wsgi.py
-        for dirpath in self.release_path.rglob("wsgi.py"):
+        for dirpath in self.project_path.rglob("wsgi.py"):
             # Get the parent directory name (the Django project module)
             module_name = dirpath.parent.name
             return f"{module_name}.wsgi:application"
@@ -320,12 +320,12 @@ class DjangoStack(BaseStack):
     def _detect_settings_module(self) -> str:
         """Detect the Django settings module."""
         # Look for settings.py
-        for dirpath in self.release_path.rglob("settings.py"):
+        for dirpath in self.project_path.rglob("settings.py"):
             module_name = dirpath.parent.name
             return f"{module_name}.settings"
 
         # Check for settings directory
-        for dirpath in self.release_path.rglob("settings"):
+        for dirpath in self.project_path.rglob("settings"):
             if dirpath.is_dir() and (dirpath / "__init__.py").exists():
                 module_name = dirpath.parent.name
                 return f"{module_name}.settings"

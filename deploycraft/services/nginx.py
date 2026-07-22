@@ -157,13 +157,6 @@ def install_nginx(pkg_manager: PackageManager) -> bool:
         error(f"Failed to start Nginx: {result.stderr.strip()[:200]}")
         return False
 
-    # Ensure sites-enabled directory exists (RHEL may not have it)
-    if not NGINX_SITES_AVAILABLE.exists():
-        run_cmd(["sudo", "mkdir", "-p", str(NGINX_SITES_AVAILABLE)])
-        run_cmd(["sudo", "mkdir", "-p", str(NGINX_SITES_ENABLED)])
-        # Add include directive to nginx.conf if not present
-        _ensure_sites_enabled_include()
-
     success("Nginx installed and running")
     return True
 
@@ -253,13 +246,9 @@ def remove_nginx_config(project_name: str) -> bool:
     Returns:
         True if removed successfully.
     """
-    available = NGINX_SITES_AVAILABLE / project_name
-    enabled = NGINX_SITES_ENABLED / project_name
     conf_d = NGINX_CONF_D / f"{project_name}.conf"
-
-    for path in [enabled, available, conf_d]:
-        if path.exists():
-            run_cmd(["sudo", "rm", "-f", str(path)])
+    if conf_d.exists():
+        run_cmd(["sudo", "rm", "-f", str(conf_d)])
 
     reload_nginx()
     return True
@@ -289,7 +278,9 @@ def reload_nginx() -> bool:
 
 
 def _write_nginx_config(project_name: str, content: str) -> bool:
-    """Write Nginx config file and enable it.
+    """Write Nginx config to /etc/nginx/conf.d/project_name.conf.
+
+    Always uses conf.d/ — no sites-available/sites-enabled symlink dance.
 
     Args:
         project_name: Name for the config file.
@@ -298,51 +289,23 @@ def _write_nginx_config(project_name: str, content: str) -> bool:
     Returns:
         True if successful.
     """
-    # Write to sites-available (or conf.d if sites-available doesn't exist)
-    if NGINX_SITES_AVAILABLE.exists():
-        config_path = NGINX_SITES_AVAILABLE / project_name
-        enabled_path = NGINX_SITES_ENABLED / project_name
-    else:
-        config_path = NGINX_CONF_D / f"{project_name}.conf"
-        enabled_path = None
+    config_path = NGINX_CONF_D / f"{project_name}.conf"
 
     # Write via temp file
     with tempfile.NamedTemporaryFile(mode="w", suffix=".conf", delete=False) as f:
         f.write(content)
         temp_path = f.name
 
+    run_cmd(["sudo", "mkdir", "-p", str(NGINX_CONF_D)])
     run_cmd(["sudo", "cp", temp_path, str(config_path)])
     run_cmd(["sudo", "chmod", "644", str(config_path)])
     Path(temp_path).unlink(missing_ok=True)
 
-    # Create symlink in sites-enabled
-    if enabled_path is not None:
-        if enabled_path.exists() or enabled_path.is_symlink():
-            run_cmd(["sudo", "rm", "-f", str(enabled_path)])
-        run_cmd(["sudo", "ln", "-s", str(config_path), str(enabled_path)])
-
     # Test and reload
     if test_nginx_config():
         reload_nginx()
-        success(f"Nginx configured for {project_name}")
+        success(f"Nginx configured: {config_path}")
         return True
     else:
         error("Nginx config test failed! Check configuration.")
         return False
-
-
-def _ensure_sites_enabled_include() -> None:
-    """Ensure nginx.conf includes sites-enabled directory."""
-    nginx_conf = Path("/etc/nginx/nginx.conf")
-    if not nginx_conf.exists():
-        return
-
-    result = run_cmd(["sudo", "grep", "-q", "sites-enabled", str(nginx_conf)])
-    if not result.success:
-        # Add include directive
-        # This is a simplified approach; in production you'd parse the config properly
-        run_cmd([
-            "sudo", "sed", "-i",
-            "/http {/a\\    include /etc/nginx/sites-enabled/*;",
-            str(nginx_conf),
-        ])

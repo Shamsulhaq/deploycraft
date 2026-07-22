@@ -64,7 +64,7 @@ class TestGenerateKeypair:
         """Test actual key generation with ssh-keygen (requires ssh-keygen installed)."""
         from deploycraft.services.ssh import generate_keypair, DEFAULT_KEY_NAME
 
-        pub_path = generate_keypair(ssh_dir=tmp_path, comment="test@host")
+        pub_path = generate_keypair(ssh_dir=tmp_path)
 
         assert pub_path is not None
         assert pub_path.exists()
@@ -73,7 +73,6 @@ class TestGenerateKeypair:
         # Verify key format
         pub_content = pub_path.read_text()
         assert pub_content.startswith("ssh-rsa")
-        assert "test@host" in pub_content
 
     def test_does_not_overwrite_without_force(self, tmp_path):
         from deploycraft.services.ssh import generate_keypair, DEFAULT_KEY_NAME

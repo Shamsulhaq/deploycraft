@@ -55,10 +55,10 @@ class ReactCRAStack(BaseStack):
             cmd = ["pnpm", "install", "--frozen-lockfile"]
         else:
             cmd = ["npm", "ci"]
-            if not (self.release_path / "package-lock.json").exists():
+            if not (self.project_path / "package-lock.json").exists():
                 cmd = ["npm", "install"]
 
-        result = run_cmd(cmd, cwd=self.release_path, timeout=300)
+        result = run_cmd(cmd, cwd=self.project_path, timeout=300)
         if not result.success:
             error(f"Dependency installation failed: {result.stderr.strip()[:300]}")
             return False
@@ -82,7 +82,7 @@ class ReactCRAStack(BaseStack):
         # CRA needs CI=true to not treat warnings as errors in some setups
         result = run_cmd(
             cmd,
-            cwd=self.release_path,
+            cwd=self.project_path,
             timeout=300,
             env={"CI": "true"},
         )
@@ -91,7 +91,7 @@ class ReactCRAStack(BaseStack):
             return False
 
         # Verify build directory was created
-        build_dir = self.release_path / "build"
+        build_dir = self.project_path / "build"
         if not build_dir.exists():
             error("Build completed but build/ directory not found")
             return False
@@ -112,7 +112,7 @@ class ReactCRAStack(BaseStack):
 
     def get_working_directory(self) -> Path:
         """The built output directory."""
-        return self.release_path / "build"
+        return self.project_path / "build"
 
     def get_log_paths(self) -> list[Path]:
         return [
@@ -124,8 +124,8 @@ class ReactCRAStack(BaseStack):
 
     def _detect_package_manager(self) -> str:
         """Detect which package manager the project uses."""
-        if (self.release_path / "pnpm-lock.yaml").exists():
+        if (self.project_path / "pnpm-lock.yaml").exists():
             return "pnpm"
-        if (self.release_path / "yarn.lock").exists():
+        if (self.project_path / "yarn.lock").exists():
             return "yarn"
         return "npm"

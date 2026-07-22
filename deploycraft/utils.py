@@ -247,6 +247,8 @@ def generate_password(length: int = 24) -> str:
 def generate_db_name(project_name: str) -> str:
     """Generate a database name from a project name.
 
+    Convention: project_name + _db suffix (e.g., backend_db)
+
     Args:
         project_name: The project name.
 
@@ -259,11 +261,17 @@ def generate_db_name(project_name: str) -> str:
     # Ensure it starts with a letter
     if name and not name[0].isalpha():
         name = "db_" + name
-    return name[:63] or "deploycraft_db"
+    # Add _db suffix
+    if not name:
+        return "deploycraft_db"
+    name = f"{name}_db"
+    return name[:63]
 
 
 def generate_db_user(project_name: str) -> str:
     """Generate a database username from a project name.
+
+    Convention: project_name + _user suffix (e.g., backend_user)
 
     Args:
         project_name: The project name.
@@ -275,6 +283,7 @@ def generate_db_user(project_name: str) -> str:
     user = "".join(c for c in user if c.isalnum() or c == "_")
     if user and not user[0].isalpha():
         user = "u_" + user
+    user = f"{user}_user"
     return user[:63] or "deploycraft_user"
 
 

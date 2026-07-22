@@ -68,7 +68,7 @@ class StackContext:
     project_config: ProjectConfig
     os_info: OSInfo
     package_manager: PackageManager
-    release_path: Path  # Path to current release directory
+    project_path: Path  # Path to current release directory
     shared_path: Path  # Path to shared directory (uploads, logs)
     env_file_path: Path  # Path to the .env file
     domain: str = ""
@@ -92,7 +92,7 @@ class BaseStack(ABC):
         self.project = context.project_config
         self.os_info = context.os_info
         self.pkg = context.package_manager
-        self.release_path = context.release_path
+        self.project_path = context.project_path
 
     @property
     @abstractmethod
@@ -208,7 +208,7 @@ class BaseStack(ABC):
         Returns:
             Path to the directory where the app should run from.
         """
-        return self.release_path
+        return self.project_path
 
     def get_environment_variables(self) -> dict[str, str]:
         """Get additional environment variables needed by this stack.
