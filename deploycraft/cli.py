@@ -374,7 +374,6 @@ def install_services(
 @app.command()
 def configure(
     project: str = typer.Argument("", help="Project name."),
-    domain: str = typer.Option("", "--domain", "-d", help="Domain name for Nginx (e.g., myapp.com)."),
 ) -> None:
     """Configure Nginx, systemd services, and .env for a project."""
     project = _resolve_project(project)
@@ -415,11 +414,6 @@ def configure(
     project_path = Path(project_config.base_path)
     env_file_path = get_env_file_path(project)
     stack_type = StackType(project_config.stack)
-
-    # Update domain if provided via flag
-    if domain:
-        project_config.domain = domain
-        save_project_config(project_config)
 
     console.print(f"\n[bold cyan]Configuring: {project}[/bold cyan] ({project_config.stack})\n")
 
@@ -560,6 +554,12 @@ def configure(
             project_config.services.append("celery-beat")
 
     # --- Step 6: Nginx ---
+    if not project_config.domain:
+        from rich.prompt import Prompt
+
+        project_config.domain = Prompt.ask("Domain name for Nginx (e.g., myapp.com)")
+        save_project_config(project_config)
+
     if project_config.domain:
         if stack_type in (StackType.REACT_VITE, StackType.REACT, StackType.HTML):
             doc_root = str(project_path / "dist") if stack_type == StackType.REACT_VITE else str(project_path / "build")
