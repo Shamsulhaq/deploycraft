@@ -667,62 +667,79 @@ server {
 
 
 def _install_nodejs_with_fallback(pkg_manager) -> bool:
-    """Install Node.js using system package manager.
+    """Install Node.js using NVM (Node Version Manager).
 
-    Uses apt/dnf directly — simpler and faster than NodeSource.
-    Waits for apt lock if another process is using it.
+    NVM installs Node.js in user directory — no sudo, no apt lock issues.
+    Steps:
+    1. Install NVM
+    2. Source bashrc
+    3. nvm install --lts
+    4. Verify node and npm work
 
     Returns:
         True if Node.js was installed successfully.
     """
-    step("Installing Node.js and npm...")
+    import os
 
-    # Wait for apt lock if needed
-    _wait_for_apt_lock()
+    step("Installing Node.js via NVM...")
 
-    # Try apt (Ubuntu/Debian)
-    result = run_cmd(["sudo", "apt-get", "install", "-y", "nodejs", "npm"], timeout=300)
-    if result.success and node.is_nodejs_installed():
-        success(f"Node.js installed: {node.get_node_version()}")
+    home = os.path.expanduser("~")
+    nvm_dir = os.path.join(home, ".nvm")
+
+    # Check if NVM already installed
+    if not os.path.exists(nvm_dir):
+        # Install NVM
+        result = run_cmd(
+            ["bash", "-c", "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash"],
+            timeout=60,
+        )
+        if not result.success:
+            error(f"NVM installation failed: {result.stderr.strip()[:200]}")
+            return False
+        success("NVM installed")
+    else:
+        console.print("  [green]✓[/green] NVM — already installed")
+
+    # Install Node.js LTS using NVM
+    # Need to source nvm.sh before running nvm commands
+    nvm_script = f'export NVM_DIR="{nvm_dir}" && [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"'
+
+    result = run_cmd(
+        ["bash", "-c", f'{nvm_script} && nvm install --lts'],
+        timeout=120,
+    )
+    if not result.success:
+        error(f"Node.js installation failed: {result.stderr.strip()[:200]}")
+        return False
+
+    # Verify node works
+    result = run_cmd(
+        ["bash", "-c", f'{nvm_script} && node --version'],
+    )
+    if result.success:
+        version = result.stdout.strip()
+        success(f"Node.js installed: {version}")
+
+        # Create symlinks so node/npm are available without sourcing nvm
+        # This makes them work in systemd services and other non-interactive shells
+        node_path = run_cmd(["bash", "-c", f'{nvm_script} && which node'])
+        npm_path = run_cmd(["bash", "-c", f'{nvm_script} && which npm'])
+
+        if node_path.success and npm_path.success:
+            node_bin = node_path.stdout.strip()
+            npm_bin = npm_path.stdout.strip()
+            # Symlink to /usr/local/bin for global access
+            run_cmd(["sudo", "ln", "-sf", node_bin, "/usr/local/bin/node"])
+            run_cmd(["sudo", "ln", "-sf", npm_bin, "/usr/local/bin/npm"])
+            # Also link npx
+            npx_path = run_cmd(["bash", "-c", f'{nvm_script} && which npx'])
+            if npx_path.success:
+                run_cmd(["sudo", "ln", "-sf", npx_path.stdout.strip(), "/usr/local/bin/npx"])
+
         return True
-
-    # Try dnf (RHEL/CentOS/Fedora)
-    result = run_cmd(["sudo", "dnf", "install", "-y", "nodejs", "npm"], timeout=300)
-    if result.success and node.is_nodejs_installed():
-        success(f"Node.js installed: {node.get_node_version()}")
-        return True
-
-    # Try yum
-    result = run_cmd(["sudo", "yum", "install", "-y", "nodejs", "npm"], timeout=300)
-    if result.success and node.is_nodejs_installed():
-        success(f"Node.js installed: {node.get_node_version()}")
-        return True
-
-    error("Could not install Node.js. Install manually: sudo apt install nodejs npm")
-    return False
-
-
-def _wait_for_apt_lock() -> None:
-    """Wait for apt/dpkg lock to be released if another process is using it."""
-    import time
-
-    lock_file = Path("/var/lib/dpkg/lock-frontend")
-    waited = False
-
-    for i in range(30):  # Wait up to 60 seconds
-        result = run_cmd(["sudo", "fuser", str(lock_file)])
-        if not result.success or not result.stdout.strip():
-            # Lock is free
-            if waited:
-                success("apt lock released, continuing...")
-            return
-        if not waited:
-            warning("Waiting for apt lock (another package manager is running)...")
-            waited = True
-        time.sleep(2)
-
-    if waited:
-        warning("apt lock still held after 60s — trying anyway...")
+    else:
+        error("Node.js installed but not accessible")
+        return False
 
 
 def _detect_stack(project_path: Path) -> str:
