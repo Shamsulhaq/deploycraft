@@ -655,33 +655,35 @@ server {
 
 
 def _install_nodejs_with_fallback(pkg_manager) -> bool:
-    """Install Node.js with fallback methods.
+    """Install Node.js using system package manager.
 
-    Tries:
-    1. NodeSource (longer timeout)
-    2. apt install nodejs npm (simple fallback)
+    Uses apt/dnf directly — simpler and faster than NodeSource.
+    System Node.js is fine for building frontend projects.
 
     Returns:
         True if Node.js was installed successfully.
     """
-    # Try NodeSource first (with longer timeout)
-    step("Installing Node.js...")
-    if node.install_nodejs(pkg_manager):
-        return True
+    step("Installing Node.js and npm...")
 
-    # Fallback: direct apt/dnf install
-    warning("NodeSource failed, trying system package...")
-    result = run_cmd(["sudo", "apt-get", "install", "-y", "nodejs", "npm"], timeout=120)
+    # Try apt (Ubuntu/Debian)
+    result = run_cmd(["sudo", "apt-get", "install", "-y", "nodejs", "npm"], timeout=300)
     if result.success and node.is_nodejs_installed():
         success(f"Node.js installed: {node.get_node_version()}")
         return True
 
-    # Try dnf for RHEL-based
-    result = run_cmd(["sudo", "dnf", "install", "-y", "nodejs", "npm"], timeout=120)
+    # Try dnf (RHEL/CentOS/Fedora)
+    result = run_cmd(["sudo", "dnf", "install", "-y", "nodejs", "npm"], timeout=300)
     if result.success and node.is_nodejs_installed():
         success(f"Node.js installed: {node.get_node_version()}")
         return True
 
+    # Try yum
+    result = run_cmd(["sudo", "yum", "install", "-y", "nodejs", "npm"], timeout=300)
+    if result.success and node.is_nodejs_installed():
+        success(f"Node.js installed: {node.get_node_version()}")
+        return True
+
+    error("Could not install Node.js. Install manually: sudo apt install nodejs npm")
     return False
 
 
