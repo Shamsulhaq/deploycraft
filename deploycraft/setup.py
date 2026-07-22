@@ -76,12 +76,18 @@ def run_setup() -> None:
     os_info, pkg_manager = ensure_supported_os()
 
     # --- Route based on stack type ---
+    setup_ok = False
     if stack_type in (StackType.DJANGO, StackType.FASTAPI):
-        _setup_python_backend(project_config, cwd, os_info, pkg_manager, stack_type)
+        setup_ok = _setup_python_backend(project_config, cwd, os_info, pkg_manager, stack_type)
     elif stack_type in (StackType.NEXTJS,):
-        _setup_nextjs(project_config, cwd, os_info, pkg_manager)
+        setup_ok = _setup_nextjs(project_config, cwd, os_info, pkg_manager)
     elif stack_type in (StackType.REACT_VITE, StackType.REACT, StackType.HTML):
-        _setup_static_frontend(project_config, cwd, os_info, pkg_manager, stack_type)
+        setup_ok = _setup_static_frontend(project_config, cwd, os_info, pkg_manager, stack_type)
+
+    if not setup_ok:
+        save_project_config(project_config)
+        error("Setup failed. Fix the issue above and run 'deploycraft setup' again.")
+        return
 
     # --- Final: Domain + Nginx + SSL ---
     _setup_nginx_and_ssl(project_config, cwd, stack_type, pkg_manager)
@@ -108,8 +114,8 @@ def _setup_python_backend(
     os_info,
     pkg_manager,
     stack_type: StackType,
-) -> None:
-    """Setup a Python backend project progressively."""
+) -> bool:
+    """Setup a Python backend project progressively. Returns True on success."""
     venv_path = project_path / "venv"
     pip_path = venv_path / "bin" / "pip"
     python_path = venv_path / "bin" / "python"
@@ -277,6 +283,8 @@ def _setup_python_backend(
         if "celery-beat" not in config.services:
             config.services.append("celery-beat")
 
+    return True
+
 
 # ─── Next.js ──────────────────────────────────────────────────────────────────
 
@@ -286,8 +294,8 @@ def _setup_nextjs(
     project_path: Path,
     os_info,
     pkg_manager,
-) -> None:
-    """Setup a Next.js project progressively."""
+) -> bool:
+    """Setup a Next.js project progressively. Returns True on success."""
     # Install Node.js — STOP if this fails
     if not node.is_nodejs_installed():
         if not _install_nodejs_with_fallback(pkg_manager):
@@ -298,7 +306,7 @@ def _setup_nextjs(
 
     if not node.is_npm_installed():
         error("npm not found. Install manually: sudo apt install npm")
-        return
+        return False
 
     # Install PM2
     pm2.install_pm2()
@@ -316,7 +324,7 @@ def _setup_nextjs(
 
     if not result.success:
         error("Dependency installation failed")
-        return
+        return False
     success("Dependencies installed")
 
     # npm build
@@ -332,7 +340,7 @@ def _setup_nextjs(
         success("Build complete")
     else:
         error("Build failed")
-        return
+        return False
 
     # Start with PM2
     port = config.port or 3000
@@ -349,6 +357,8 @@ def _setup_nextjs(
     if "pm2" not in config.services:
         config.services.append("pm2")
 
+    return True
+
 
 # ─── Static Frontend (React Vite/CRA, HTML) ──────────────────────────────────
 
@@ -359,11 +369,11 @@ def _setup_static_frontend(
     os_info,
     pkg_manager,
     stack_type: StackType,
-) -> None:
-    """Setup a static frontend project."""
+) -> bool:
+    """Setup a static frontend project. Returns True on success."""
     if stack_type == StackType.HTML:
         console.print("  [green]✓[/green] Static HTML — no build needed")
-        return
+        return True
 
     # Install Node.js — STOP if this fails
     if not node.is_nodejs_installed():
@@ -376,7 +386,7 @@ def _setup_static_frontend(
     # Verify npm is available
     if not node.is_npm_installed():
         error("npm not found. Install manually: sudo apt install npm")
-        return
+        return False
 
     # npm install
     step("Installing dependencies...")
@@ -391,7 +401,7 @@ def _setup_static_frontend(
 
     if not result.success:
         error("Dependency installation failed")
-        return
+        return False
     success("Dependencies installed")
 
     # npm build
@@ -406,8 +416,10 @@ def _setup_static_frontend(
     if result.success:
         build_dir = "dist" if stack_type == StackType.REACT_VITE else "build"
         success(f"Build complete → {build_dir}/")
+        return True
     else:
         error("Build failed")
+        return False
 
 
 # ─── Nginx + SSL (shared) ─────────────────────────────────────────────────────
@@ -658,12 +670,15 @@ def _install_nodejs_with_fallback(pkg_manager) -> bool:
     """Install Node.js using system package manager.
 
     Uses apt/dnf directly — simpler and faster than NodeSource.
-    System Node.js is fine for building frontend projects.
+    Waits for apt lock if another process is using it.
 
     Returns:
         True if Node.js was installed successfully.
     """
     step("Installing Node.js and npm...")
+
+    # Wait for apt lock if needed
+    _wait_for_apt_lock()
 
     # Try apt (Ubuntu/Debian)
     result = run_cmd(["sudo", "apt-get", "install", "-y", "nodejs", "npm"], timeout=300)
@@ -685,6 +700,29 @@ def _install_nodejs_with_fallback(pkg_manager) -> bool:
 
     error("Could not install Node.js. Install manually: sudo apt install nodejs npm")
     return False
+
+
+def _wait_for_apt_lock() -> None:
+    """Wait for apt/dpkg lock to be released if another process is using it."""
+    import time
+
+    lock_file = Path("/var/lib/dpkg/lock-frontend")
+    waited = False
+
+    for i in range(30):  # Wait up to 60 seconds
+        result = run_cmd(["sudo", "fuser", str(lock_file)])
+        if not result.success or not result.stdout.strip():
+            # Lock is free
+            if waited:
+                success("apt lock released, continuing...")
+            return
+        if not waited:
+            warning("Waiting for apt lock (another package manager is running)...")
+            waited = True
+        time.sleep(2)
+
+    if waited:
+        warning("apt lock still held after 60s — trying anyway...")
 
 
 def _detect_stack(project_path: Path) -> str:
