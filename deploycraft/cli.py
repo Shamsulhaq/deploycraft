@@ -282,8 +282,25 @@ def install_services(
 
     project_config = load_project_config(project)
     if not project_config:
-        console.print(f"[red]Project '{project}' not found. Run 'deploycraft deploy' first.[/red]")
-        raise typer.Exit(1)
+        # Auto-create project config from current directory
+        import os
+
+        cwd = Path(os.getcwd())
+        stack = _detect_stack_type(cwd)
+        if not stack:
+            console.print("[red]Could not detect stack type. Use 'deploycraft deploy' for full setup.[/red]")
+            raise typer.Exit(1)
+
+        from deploycraft.config import ProjectConfig
+
+        project_config = ProjectConfig(
+            name=project,
+            stack=stack,
+            base_path=str(cwd),
+            git_url="",
+        )
+        save_project_config(project_config)
+        console.print(f"  [dim]Created project config: {project} ({stack})[/dim]")
 
     os_info, pkg_manager = ensure_supported_os()
     project_path = Path(project_config.base_path)
@@ -359,8 +376,22 @@ def configure(
 
     project_config = load_project_config(project)
     if not project_config:
-        console.print(f"[red]Project '{project}' not found.[/red]")
-        raise typer.Exit(1)
+        import os
+
+        cwd = Path(os.getcwd())
+        stack = _detect_stack_type(cwd)
+        if not stack:
+            console.print("[red]Could not detect stack. Use 'deploycraft deploy' for full setup.[/red]")
+            raise typer.Exit(1)
+
+        from rich.prompt import Prompt
+
+        from deploycraft.config import ProjectConfig
+
+        domain = Prompt.ask("Domain name (e.g., myapp.com)", default="")
+        project_config = ProjectConfig(name=project, stack=stack, base_path=str(cwd), git_url="", domain=domain)
+        save_project_config(project_config)
+        console.print(f"  [dim]Created project config: {project} ({stack})[/dim]")
 
     os_info, pkg_manager = ensure_supported_os()
     project_path = Path(project_config.base_path)
@@ -441,7 +472,7 @@ def restart(
 
     project_config = load_project_config(project)
     if not project_config:
-        console.print(f"[red]Project '{project}' not found.[/red]")
+        console.print(f"[red]Project '{project}' not configured yet. Run 'deploycraft configure' first.[/red]")
         raise typer.Exit(1)
 
     stack_type = StackType(project_config.stack)
