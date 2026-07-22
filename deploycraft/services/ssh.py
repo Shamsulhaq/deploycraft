@@ -70,6 +70,7 @@ def generate_keypair(
     """Generate an Ed25519 SSH keypair.
 
     Ed25519 is used instead of RSA — it's shorter, faster, and more secure.
+    Also configures ~/.ssh/config so git automatically uses this key.
 
     Args:
         key_name: Base name for the key files.
@@ -85,6 +86,8 @@ def generate_keypair(
 
     # Check if already exists
     if private_key.exists() and not force:
+        # Still ensure SSH config is set up
+        _ensure_ssh_config(private_key, ssh_dir)
         return public_key
 
     # Create SSH directory with correct permissions
@@ -114,6 +117,9 @@ def generate_keypair(
     # Ensure correct permissions
     private_key.chmod(0o600)
     public_key.chmod(0o644)
+
+    # Configure SSH to use this key for git hosts
+    _ensure_ssh_config(private_key, ssh_dir)
 
     success(f"SSH keypair generated: {private_key}")
     return public_key
@@ -281,3 +287,66 @@ def test_ssh_connection(git_url: str) -> bool:
 
     warning(f"SSH connection to {host} may not be authorized yet")
     return False
+
+
+def _ensure_ssh_config(private_key_path: Path, ssh_dir: Optional[Path] = None) -> None:
+    """Configure ~/.ssh/config so SSH uses our deploy key for git hosts.
+
+    Adds entries for github.com, gitlab.com, and bitbucket.org pointing
+    to our deploy key. This is required because SSH won't automatically
+    try a key with a non-standard name.
+
+    Args:
+        private_key_path: Path to the private key file.
+        ssh_dir: SSH directory (defaults to current user's ~/.ssh).
+    """
+    ssh_dir = ssh_dir or get_ssh_dir()
+    config_path = ssh_dir / "config"
+
+    # The config block we want to add
+    marker = "# DeployCraft deploy key configuration"
+    config_block = f"""\n{marker}
+Host github.com
+    HostName github.com
+    User git
+    IdentityFile {private_key_path}
+    IdentitiesOnly yes
+    StrictHostKeyChecking accept-new
+
+Host gitlab.com
+    HostName gitlab.com
+    User git
+    IdentityFile {private_key_path}
+    IdentitiesOnly yes
+    StrictHostKeyChecking accept-new
+
+Host bitbucket.org
+    HostName bitbucket.org
+    User git
+    IdentityFile {private_key_path}
+    IdentitiesOnly yes
+    StrictHostKeyChecking accept-new
+"""
+
+    # Check if already configured
+    if config_path.exists():
+        existing_content = config_path.read_text()
+        if marker in existing_content:
+            # Already configured — update the key path in case it changed
+            import re
+            # Remove old block and add new one
+            pattern = f"{marker}.*?(?=\\n# |\\Z)"
+            cleaned = re.sub(pattern, "", existing_content, flags=re.DOTALL).rstrip()
+            config_path.write_text(cleaned + config_block)
+            config_path.chmod(0o600)
+            return
+        else:
+            # Append to existing config
+            with config_path.open("a") as f:
+                f.write(config_block)
+    else:
+        # Create new config
+        config_path.write_text(config_block.lstrip())
+
+    config_path.chmod(0o600)
+    step("SSH config updated to use deploy key")
