@@ -93,6 +93,14 @@ def deploy() -> None:
 
 
 @app.command()
+def setup() -> None:
+    """Progressive project setup from current directory (recommended)."""
+    from deploycraft.setup import run_setup
+
+    run_setup()
+
+
+@app.command()
 def redeploy(
     project: str = typer.Argument("", help="Project name to redeploy."),
 ) -> None:

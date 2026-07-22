@@ -20,6 +20,7 @@ console = Console()
 # All available top-level and subcommands for tab completion
 COMMANDS = [
     "init",
+    "setup",
     "deploy",
     "clone",
     "inspect",
@@ -118,6 +119,7 @@ def _print_help() -> None:
 
     commands_help = [
         ("init", "First-time setup (SMTP, admin email, preferences)"),
+        ("setup", "Progressive project setup (recommended)"),
         ("deploy", "Interactive deployment wizard (all steps)"),
         ("", ""),
         ("clone <url>", "Clone a git repo (--path, --branch)"),
