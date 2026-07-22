@@ -41,7 +41,7 @@ class TestKeyExists:
         from deploycraft.services.ssh import key_exists, DEFAULT_KEY_NAME
 
         (tmp_path / DEFAULT_KEY_NAME).write_text("private")
-        (tmp_path / f"{DEFAULT_KEY_NAME}.pub").write_text("ssh-ed25519 AAAA...")
+        (tmp_path / f"{DEFAULT_KEY_NAME}.pub").write_text("ssh-rsa AAAA...")
         assert key_exists(ssh_dir=tmp_path) is True
 
 
@@ -72,7 +72,7 @@ class TestGenerateKeypair:
 
         # Verify key format
         pub_content = pub_path.read_text()
-        assert pub_content.startswith("ssh-ed25519")
+        assert pub_content.startswith("ssh-rsa")
         assert "test@host" in pub_content
 
     def test_does_not_overwrite_without_force(self, tmp_path):
@@ -102,7 +102,7 @@ class TestGenerateKeypair:
         assert result is not None
         new_content = pub.read_text()
         assert new_content != "old-public"
-        assert "ssh-ed25519" in new_content
+        assert "ssh-rsa" in new_content
 
 
 class TestEnsureKeypairExists:
@@ -111,12 +111,12 @@ class TestEnsureKeypairExists:
 
         public_key = ensure_keypair_exists(ssh_dir=tmp_path)
         assert public_key is not None
-        assert "ssh-ed25519" in public_key
+        assert "ssh-rsa" in public_key
 
     def test_returns_existing_key(self, tmp_path):
         from deploycraft.services.ssh import ensure_keypair_exists, DEFAULT_KEY_NAME
 
-        pub_content = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI existing@key"
+        pub_content = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAA existing@key"
         priv = tmp_path / DEFAULT_KEY_NAME
         pub = tmp_path / f"{DEFAULT_KEY_NAME}.pub"
         priv.write_text("private")
