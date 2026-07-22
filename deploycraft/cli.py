@@ -437,24 +437,46 @@ def configure(
     create_env_file(project, env_vars)
     symlink_env_to_project(project, project_path)
 
-    # Configure stack (creates systemd service)
+    # Set up stack: venv, dependencies, build, migrations
     stack_type = StackType(project_config.stack)
     stack_class = get_stack_class(stack_type)
-    if stack_class:
-        context = StackContext(
-            project_config=project_config,
-            os_info=os_info,
-            package_manager=pkg_manager,
-            project_path=project_path,
-            shared_path=project_path / "shared",
-            env_file_path=env_file_path,
-            domain=project_config.domain,
-        )
-        stack_instance = stack_class(context)
-        service_name = stack_instance.get_service_name()
-        systemd.enable_service(service_name)
+    if not stack_class:
+        console.print(f"[red]Unknown stack: {project_config.stack}[/red]")
+        raise typer.Exit(1)
 
-    # Configure Nginx
+    context = StackContext(
+        project_config=project_config,
+        os_info=os_info,
+        package_manager=pkg_manager,
+        project_path=project_path,
+        shared_path=project_path / "shared",
+        env_file_path=env_file_path,
+        domain=project_config.domain,
+    )
+    stack_instance = stack_class(context)
+
+    # Step 1: Create venv and install dependencies
+    console.print("\n[bold]Installing dependencies...[/bold]")
+    if not stack_instance.install_dependencies():
+        console.print("[red]Dependency installation failed.[/red]")
+        raise typer.Exit(1)
+
+    # Step 2: Build (collectstatic for Django, npm build for Node, etc.)
+    console.print("\n[bold]Building...[/bold]")
+    if not stack_instance.build():
+        console.print("[red]Build failed.[/red]")
+        raise typer.Exit(1)
+
+    # Step 3: Run migrations
+    console.print("\n[bold]Running migrations...[/bold]")
+    stack_instance.run_migrations()
+
+    # Step 4: Create systemd service and enable
+    console.print("\n[bold]Setting up process manager...[/bold]")
+    service_name = stack_instance.get_service_name()
+    systemd.enable_service(service_name)
+
+    # Step 5: Configure Nginx
     if project_config.domain:
         if stack_type in (StackType.REACT_VITE, StackType.REACT, StackType.HTML):
             doc_root = str(project_path / "dist") if stack_type == StackType.REACT_VITE else str(project_path / "build")
