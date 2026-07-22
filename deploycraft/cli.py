@@ -377,6 +377,7 @@ def configure(
 ) -> None:
     """Configure Nginx, systemd services, and .env for a project."""
     project = _resolve_project(project)
+    import os
     from pathlib import Path
 
     from deploycraft.config import load_project_config, save_project_config
@@ -390,11 +391,10 @@ def configure(
     from deploycraft.services import nginx, redis, systemd
     from deploycraft.stacks import StackType, get_stack_class
     from deploycraft.stacks.base import StackContext
+    from deploycraft.utils import run_cmd
 
     project_config = load_project_config(project)
     if not project_config:
-        import os
-
         cwd = Path(os.getcwd())
         stack = _detect_stack_type(cwd)
         if not stack:
@@ -413,37 +413,98 @@ def configure(
     os_info, pkg_manager = ensure_supported_os()
     project_path = Path(project_config.base_path)
     env_file_path = get_env_file_path(project)
-
-    # Collect .env variables
-    db_info = None
-    if project_config.db_name:
-        db_info = {
-            "db_name": project_config.db_name,
-            "db_user": project_config.db_user,
-            "db_password": project_config.db_password,
-            "db_host": "localhost",
-            "db_port": "5432",
-        }
-
-    redis_url = redis.get_redis_url() if "redis" in project_config.services else ""
-
-    env_vars = collect_env_vars_interactive(
-        project_name=project,
-        stack=project_config.stack,
-        db_info=db_info,
-        domain=project_config.domain,
-        redis_url=redis_url,
-    )
-    create_env_file(project, env_vars)
-    symlink_env_to_project(project, project_path)
-
-    # Set up stack: venv, dependencies, build, migrations
     stack_type = StackType(project_config.stack)
-    stack_class = get_stack_class(stack_type)
-    if not stack_class:
-        console.print(f"[red]Unknown stack: {project_config.stack}[/red]")
-        raise typer.Exit(1)
 
+    console.print(f"\n[bold cyan]Configuring: {project}[/bold cyan] ({project_config.stack})\n")
+
+    # --- Step 1: .env file ---
+    env_in_project = project_path / ".env"
+    if env_in_project.exists():
+        console.print("  [green]✓[/green] .env file — already exists, skipping")
+    else:
+        db_info = None
+        if project_config.db_name:
+            db_info = {
+                "db_name": project_config.db_name,
+                "db_user": project_config.db_user,
+                "db_password": project_config.db_password,
+                "db_host": "localhost",
+                "db_port": "5432",
+            }
+        redis_url = redis.get_redis_url() if "redis" in project_config.services else ""
+
+        env_vars = collect_env_vars_interactive(
+            project_name=project,
+            stack=project_config.stack,
+            db_info=db_info,
+            domain=project_config.domain,
+            redis_url=redis_url,
+        )
+        create_env_file(project, env_vars)
+        symlink_env_to_project(project, project_path)
+        console.print("  [green]✓[/green] .env file — created")
+
+    # --- Step 2: Virtual environment + dependencies ---
+    venv_path = project_path / "venv"
+    pip_path = venv_path / "bin" / "pip"
+
+    if venv_path.exists() and pip_path.exists():
+        console.print("  [green]✓[/green] Virtual environment — already exists, skipping creation")
+    else:
+        console.print("  [blue]→[/blue] Creating virtual environment...")
+        result = run_cmd(["python3", "-m", "venv", str(venv_path)])
+        if not result.success:
+            console.print("  [red]✗[/red] Failed to create virtualenv")
+            raise typer.Exit(1)
+        console.print("  [green]✓[/green] Virtual environment — created")
+
+    # Install requirements + gunicorn
+    console.print("  [blue]→[/blue] Installing requirements...")
+    req_file = project_path / "requirements.txt"
+    if req_file.exists():
+        run_cmd([str(pip_path), "install", "--upgrade", "pip", "setuptools", "wheel"], timeout=60)
+        result = run_cmd([str(pip_path), "install", "-r", str(req_file)], timeout=300)
+        if result.success:
+            console.print("  [green]✓[/green] Requirements — installed")
+        else:
+            console.print(f"  [red]✗[/red] Requirements install failed: {result.stderr.strip()[:100]}")
+            raise typer.Exit(1)
+    else:
+        console.print("  [yellow]⚠[/yellow] No requirements.txt found, skipping")
+
+    # Install gunicorn/uvicorn
+    if stack_type == StackType.DJANGO:
+        run_cmd([str(pip_path), "install", "gunicorn"])
+        console.print("  [green]✓[/green] Gunicorn — installed")
+    elif stack_type == StackType.FASTAPI:
+        run_cmd([str(pip_path), "install", "uvicorn[standard]"])
+        console.print("  [green]✓[/green] Uvicorn — installed")
+
+    # --- Step 3: Collect static / build ---
+    if stack_type == StackType.DJANGO:
+        python_path = venv_path / "bin" / "python"
+        manage_py = project_path / "manage.py"
+        if manage_py.exists():
+            result = run_cmd([str(python_path), "manage.py", "collectstatic", "--noinput"], cwd=project_path)
+            if result.success:
+                console.print("  [green]✓[/green] collectstatic — done")
+            else:
+                console.print("  [yellow]⚠[/yellow] collectstatic — skipped (failed)")
+
+    # --- Step 4: Migrations ---
+    if stack_type in (StackType.DJANGO, StackType.FASTAPI):
+        python_path = venv_path / "bin" / "python"
+        manage_py = project_path / "manage.py"
+        if manage_py.exists():
+            result = run_cmd([str(python_path), "manage.py", "migrate", "--noinput"], cwd=project_path)
+            if result.success:
+                console.print("  [green]✓[/green] Migrations — applied")
+            else:
+                console.print("  [yellow]⚠[/yellow] Migrations — failed (check .env DB settings)")
+
+    # --- Step 5: Systemd services ---
+    # Detect what's needed
+    stack_class = get_stack_class(stack_type)
     context = StackContext(
         project_config=project_config,
         os_info=os_info,
@@ -454,29 +515,45 @@ def configure(
         domain=project_config.domain,
     )
     stack_instance = stack_class(context)
+    detected = stack_instance.detect_services(project_path)
 
-    # Step 1: Create venv and install dependencies
-    console.print("\n[bold]Installing dependencies...[/bold]")
-    if not stack_instance.install_dependencies():
-        console.print("[red]Dependency installation failed.[/red]")
-        raise typer.Exit(1)
-
-    # Step 2: Build (collectstatic for Django, npm build for Node, etc.)
-    console.print("\n[bold]Building...[/bold]")
-    if not stack_instance.build():
-        console.print("[red]Build failed.[/red]")
-        raise typer.Exit(1)
-
-    # Step 3: Run migrations
-    console.print("\n[bold]Running migrations...[/bold]")
-    stack_instance.run_migrations()
-
-    # Step 4: Create systemd service and enable
-    console.print("\n[bold]Setting up process manager...[/bold]")
+    # Gunicorn/Uvicorn service
     service_name = stack_instance.get_service_name()
     systemd.enable_service(service_name)
+    console.print(f"  [green]✓[/green] {service_name}.service — active")
 
-    # Step 5: Configure Nginx
+    # Celery worker
+    if detected.needs_celery:
+        celery_app = _detect_celery_app_name(project_path, project)
+        systemd.create_celery_worker_service(
+            project_name=project,
+            working_dir=project_path,
+            venv_path=venv_path,
+            celery_app=celery_app,
+            env_file=env_file_path,
+        )
+        systemd.enable_service(f"{project}-celery-worker")
+        console.print(f"  [green]✓[/green] {project}-celery-worker.service — active")
+        if "celery" not in project_config.services:
+            project_config.services.append("celery")
+
+    # Celery beat
+    if detected.needs_celery_beat:
+        celery_app = _detect_celery_app_name(project_path, project)
+        systemd.create_celery_beat_service(
+            project_name=project,
+            working_dir=project_path,
+            venv_path=venv_path,
+            celery_app=celery_app,
+            env_file=env_file_path,
+            shared_dir=project_path / "shared",
+        )
+        systemd.enable_service(f"{project}-celery-beat")
+        console.print(f"  [green]✓[/green] {project}-celery-beat.service — active")
+        if "celery-beat" not in project_config.services:
+            project_config.services.append("celery-beat")
+
+    # --- Step 6: Nginx ---
     if project_config.domain:
         if stack_type in (StackType.REACT_VITE, StackType.REACT, StackType.HTML):
             doc_root = str(project_path / "dist") if stack_type == StackType.REACT_VITE else str(project_path / "build")
@@ -494,9 +571,13 @@ def configure(
                 media_path=str(project_path / "shared" / "media"),
                 use_socket=True,
             )
+        console.print(f"  [green]✓[/green] Nginx — /etc/nginx/conf.d/{project}.conf")
+    else:
+        console.print("  [yellow]⚠[/yellow] Nginx — skipped (no domain configured)")
 
+    # Save config
     save_project_config(project_config)
-    console.print("[green]✓ Project configured.[/green]")
+    console.print(f"\n[bold green]✓ All done! Project '{project}' is configured and running.[/bold green]")
 
 
 @app.command()
@@ -718,6 +799,17 @@ def user_list() -> None:
         table.add_row(user, "✓")
 
     console.print(table)
+
+
+def _detect_celery_app_name(project_path, project_name: str) -> str:
+    """Detect Celery app module name from project structure."""
+    from pathlib import Path
+
+    p = Path(project_path)
+    for candidate in p.iterdir():
+        if candidate.is_dir() and (candidate / "celery.py").exists():
+            return candidate.name
+    return project_name
 
 
 def _detect_stack_type(project_path) -> str:
