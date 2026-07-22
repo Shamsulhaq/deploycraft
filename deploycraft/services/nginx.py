@@ -164,17 +164,17 @@ def install_nginx(pkg_manager: PackageManager) -> bool:
 def create_reverse_proxy_config(
     project_name: str,
     domain: str,
-    upstream: str = "unix:/run/{project}/gunicorn.sock",
+    upstream: str = "127.0.0.1:8000",
     static_path: Optional[str] = None,
     media_path: Optional[str] = None,
-    use_socket: bool = True,
+    use_socket: bool = False,
 ) -> bool:
     """Create an Nginx reverse proxy configuration.
 
     Args:
         project_name: Name of the project.
         domain: Domain name for the server block.
-        upstream: Upstream server (host:port or unix socket path).
+        upstream: Upstream server (host:port). Default: 127.0.0.1:8000.
         static_path: Path to static files directory.
         media_path: Path to media files directory.
         use_socket: Whether to use Unix socket or TCP proxy.
@@ -193,7 +193,7 @@ def create_reverse_proxy_config(
             project_name=project_name,
             domain=domain,
             socket_path=socket_path,
-            static_path=static_path or f"/var/www/{project_name}/current/staticfiles",
+            static_path=static_path or f"/var/www/{project_name}/staticfiles",
             media_path=media_path,
         )
     else:

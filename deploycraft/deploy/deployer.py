@@ -365,9 +365,10 @@ def _deploy_single_project(global_config: GlobalConfig) -> None:
         nginx.create_reverse_proxy_config(
             project_name=project_name,
             domain=domain,
+            upstream="127.0.0.1:8000",
             static_path=str(project_path / "staticfiles"),
             media_path=str(shared_path / "media"),
-            use_socket=True,
+            use_socket=False,
         )
 
     # --- Step 14: SSL Certificate ---

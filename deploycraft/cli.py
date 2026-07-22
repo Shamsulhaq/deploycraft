@@ -573,9 +573,10 @@ def configure(
         else:
             nginx.create_reverse_proxy_config(
                 project, project_config.domain,
+                upstream="127.0.0.1:8000",
                 static_path=str(project_path / "staticfiles"),
                 media_path=str(project_path / "shared" / "media"),
-                use_socket=True,
+                use_socket=False,
             )
         console.print(f"  [green]✓[/green] Nginx — /etc/nginx/conf.d/{project}.conf")
     else:

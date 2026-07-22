@@ -29,7 +29,7 @@ Environment="PATH={{ venv_path }}/bin:/usr/local/bin:/usr/bin"
 EnvironmentFile={{ env_file }}
 ExecStart={{ venv_path }}/bin/gunicorn {{ wsgi_app }} \\
     --workers {{ workers }} \\
-    --bind unix:{{ socket_path }} \\
+    --bind 127.0.0.1:{{ port }} \\
     --access-logfile {{ log_dir }}/gunicorn-access.log \\
     --error-logfile {{ log_dir }}/gunicorn-error.log \\
     --timeout 120
@@ -115,12 +115,16 @@ def create_gunicorn_service(
     venv_path: Path,
     wsgi_app: str,
     env_file: Path,
-    user: str = "www-data",
-    group: str = "www-data",
+    user: str = "",
+    group: str = "",
     workers: int = 3,
+    port: int = 8000,
     log_dir: Optional[Path] = None,
 ) -> str:
     """Create a systemd service file for Gunicorn.
+
+    Uses TCP port (127.0.0.1:port) instead of Unix socket for simplicity.
+    Auto-detects user from the project directory owner if not specified.
 
     Args:
         project_name: Name of the project.
@@ -128,24 +132,30 @@ def create_gunicorn_service(
         venv_path: Path to Python virtualenv.
         wsgi_app: WSGI application path (e.g., "myapp.wsgi:application").
         env_file: Path to environment file.
-        user: System user to run as.
-        group: System group.
+        user: System user to run as (auto-detected if empty).
+        group: System group (auto-detected if empty).
         workers: Number of Gunicorn workers.
+        port: TCP port to bind to.
         log_dir: Directory for log files.
 
     Returns:
         The service name.
     """
     service_name = f"{project_name}-gunicorn"
-    log_dir = log_dir or (working_dir.parent / "shared" / "logs")
+    log_dir = log_dir or (working_dir / "shared" / "logs")
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    socket_path = f"/run/{project_name}/gunicorn.sock"
-
-    # Ensure socket directory exists
-    socket_dir = Path(f"/run/{project_name}")
-    run_cmd(["sudo", "mkdir", "-p", str(socket_dir)])
-    run_cmd(["sudo", "chown", f"{user}:{group}", str(socket_dir)])
+    # Auto-detect user from directory owner
+    if not user:
+        import os
+        stat_info = os.stat(working_dir)
+        import pwd
+        try:
+            user = pwd.getpwuid(stat_info.st_uid).pw_name
+        except KeyError:
+            user = "www-data"
+    if not group:
+        group = user
 
     env = Environment(loader=BaseLoader())
     template = env.from_string(GUNICORN_SERVICE_TEMPLATE)
@@ -158,7 +168,7 @@ def create_gunicorn_service(
         user=user,
         group=group,
         workers=workers,
-        socket_path=socket_path,
+        port=port,
         log_dir=str(log_dir),
     )
 
