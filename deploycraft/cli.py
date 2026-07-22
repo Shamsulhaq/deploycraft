@@ -24,6 +24,38 @@ app.add_typer(user_app, name="user")
 console = Console()
 
 
+def _resolve_project(project: str = "") -> str:
+    """Resolve project name from argument or current directory.
+
+    If project name is given, use it. Otherwise, detect from current directory
+    by looking for a DeployCraft project config that matches the current path,
+    or use the current directory name.
+
+    Args:
+        project: Explicit project name (empty = auto-detect from cwd).
+
+    Returns:
+        Project name string.
+    """
+    if project:
+        return project
+
+    import os
+    from pathlib import Path
+
+    cwd = Path(os.getcwd())
+
+    # Check if current dir is a managed project (by matching base_path)
+    from deploycraft.config import get_all_projects
+
+    for p in get_all_projects():
+        if Path(p.base_path).resolve() == cwd.resolve():
+            return p.name
+
+    # Fallback: use current directory name
+    return cwd.name
+
+
 def version_callback(value: bool) -> None:
     if value:
         console.print(f"DeployCraft v{__version__}")
@@ -62,9 +94,10 @@ def deploy() -> None:
 
 @app.command()
 def redeploy(
-    project: str = typer.Argument(..., help="Project name to redeploy."),
+    project: str = typer.Argument("", help="Project name to redeploy."),
 ) -> None:
     """Pull latest code and redeploy a project."""
+    project = _resolve_project(project)
     from deploycraft.deploy.deployer import run_redeploy
 
     run_redeploy(project)
@@ -72,9 +105,10 @@ def redeploy(
 
 @app.command()
 def rollback(
-    project: str = typer.Argument(..., help="Project name to rollback."),
+    project: str = typer.Argument("", help="Project name to rollback."),
 ) -> None:
     """Revert a project to its previous release version."""
+    project = _resolve_project(project)
     from deploycraft.deploy.rollback import run_rollback
 
     run_rollback(project)
@@ -82,9 +116,10 @@ def rollback(
 
 @app.command()
 def stable(
-    project: str = typer.Argument(..., help="Project name to mark as stable."),
+    project: str = typer.Argument("", help="Project name to mark as stable."),
 ) -> None:
     """Mark the current release as stable (rollback floor)."""
+    project = _resolve_project(project)
     from deploycraft.deploy.rollback import mark_stable
 
     mark_stable(project)
@@ -108,10 +143,11 @@ def list_projects() -> None:
 
 @app.command()
 def remove(
-    project: str = typer.Argument(..., help="Project name to remove."),
+    project: str = typer.Argument("", help="Project name to remove."),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation prompt."),
 ) -> None:
     """Remove a managed project (with confirmation)."""
+    project = _resolve_project(project)
     from deploycraft.deploy.deployer import remove_project
 
     remove_project(project, force=force)
@@ -119,10 +155,11 @@ def remove(
 
 @app.command()
 def logs(
-    project: str = typer.Argument(..., help="Project name to view logs for."),
+    project: str = typer.Argument("", help="Project name to view logs for."),
     lines: int = typer.Option(50, "--lines", "-n", help="Number of log lines to show."),
 ) -> None:
     """Tail logs for a project's services."""
+    project = _resolve_project(project)
     from deploycraft.deploy.deployer import show_logs
 
     show_logs(project, lines=lines)
@@ -230,9 +267,10 @@ def inspect(
 
 @app.command(name="install-services")
 def install_services(
-    project: str = typer.Argument(..., help="Project name."),
+    project: str = typer.Argument("", help="Project name."),
 ) -> None:
     """Install system services (PostgreSQL, Redis, Node.js, etc.) for a project."""
+    project = _resolve_project(project)
     from pathlib import Path
 
     from deploycraft.config import load_project_config, save_project_config
@@ -301,9 +339,10 @@ def install_services(
 
 @app.command()
 def configure(
-    project: str = typer.Argument(..., help="Project name."),
+    project: str = typer.Argument("", help="Project name."),
 ) -> None:
     """Configure Nginx, systemd services, and .env for a project."""
+    project = _resolve_project(project)
     from pathlib import Path
 
     from deploycraft.config import load_project_config, save_project_config
@@ -392,9 +431,10 @@ def configure(
 
 @app.command()
 def restart(
-    project: str = typer.Argument(..., help="Project name to restart."),
+    project: str = typer.Argument("", help="Project name to restart."),
 ) -> None:
     """Restart all services for a project."""
+    project = _resolve_project(project)
     from deploycraft.config import load_project_config
     from deploycraft.services import pm2, systemd
     from deploycraft.stacks.base import StackType
