@@ -513,9 +513,17 @@ def configure(
         shared_path=project_path / "shared",
         env_file_path=env_file_path,
         domain=project_config.domain,
+        port=project_config.port or 8000,
     )
     stack_instance = stack_class(context)
     detected = stack_instance.detect_services(project_path)
+
+    # Assign port if not set
+    if project_config.port == 0 and stack_type in (StackType.DJANGO, StackType.FASTAPI):
+        from deploycraft.config import get_next_available_port
+
+        project_config.port = get_next_available_port()
+        console.print(f"  [green]✓[/green] Port assigned — {project_config.port}")
 
     # Gunicorn/Uvicorn service
     service_name = stack_instance.get_service_name()
@@ -573,7 +581,7 @@ def configure(
         else:
             nginx.create_reverse_proxy_config(
                 project, project_config.domain,
-                upstream="127.0.0.1:8000",
+                upstream=f"127.0.0.1:{project_config.port or 8000}",
                 static_path=str(project_path / "staticfiles"),
                 media_path=str(project_path / "shared" / "media"),
                 use_socket=False,

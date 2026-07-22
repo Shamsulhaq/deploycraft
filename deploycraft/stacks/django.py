@@ -245,11 +245,12 @@ class DjangoStack(BaseStack):
         """Get the Gunicorn command for this Django project."""
         venv_path = self.project_path / "venv"
         wsgi_app = self._detect_wsgi_app()
+        port = self.context.port or self.project.port or 8000
         return [
             str(venv_path / "bin" / "gunicorn"),
             wsgi_app,
             "--workers", "3",
-            "--bind", f"unix:/run/{self.project.name}/gunicorn.sock",
+            "--bind", f"127.0.0.1:{port}",
         ]
 
     def get_service_name(self) -> str:
@@ -267,6 +268,7 @@ class DjangoStack(BaseStack):
             wsgi_app=wsgi_app,
             env_file=self.context.env_file_path,
             workers=self._calculate_workers(),
+            port=self.context.port or self.project.port or 8000,
         )
 
         return service_name

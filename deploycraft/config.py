@@ -102,6 +102,7 @@ class ProjectConfig:
     node_version: str = "lts"
     created_at: str = ""
     last_deployed: str = ""
+    port: int = 0  # Auto-assigned TCP port for gunicorn/uvicorn (8000, 8001, ...)
 
 
 def load_global_config() -> GlobalConfig:
@@ -182,6 +183,27 @@ def get_all_projects() -> list[ProjectConfig]:
         except (json.JSONDecodeError, TypeError):
             continue
     return projects
+
+
+def get_next_available_port(start_port: int = 8000) -> int:
+    """Get the next available port for a new project.
+
+    Scans all existing project configs and returns the next unused port.
+    Starts from 8000 (first Django project), 8001 (second), etc.
+
+    Args:
+        start_port: Starting port number.
+
+    Returns:
+        Next available port number.
+    """
+    projects = get_all_projects()
+    used_ports = {p.port for p in projects if p.port > 0}
+
+    port = start_port
+    while port in used_ports:
+        port += 1
+    return port
 
 
 def run_init_wizard() -> None:
