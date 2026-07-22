@@ -288,11 +288,17 @@ def _setup_nextjs(
     pkg_manager,
 ) -> None:
     """Setup a Next.js project progressively."""
-    # Install Node.js
+    # Install Node.js — STOP if this fails
     if not node.is_nodejs_installed():
-        node.install_nodejs(pkg_manager)
+        if not _install_nodejs_with_fallback(pkg_manager):
+            error("Node.js installation failed. Install manually: sudo apt install nodejs npm")
+            return
     else:
         console.print(f"  [green]✓[/green] Node.js — {node.get_node_version()}")
+
+    if not node.is_npm_installed():
+        error("npm not found. Install manually: sudo apt install npm")
+        return
 
     # Install PM2
     pm2.install_pm2()
@@ -301,12 +307,16 @@ def _setup_nextjs(
     step("Installing dependencies...")
     pkg_mgr = _detect_node_pkg_manager(project_path)
     if pkg_mgr == "yarn":
-        run_cmd(["yarn", "install"], cwd=project_path, timeout=300)
+        result = run_cmd(["yarn", "install"], cwd=project_path, timeout=300)
     elif pkg_mgr == "pnpm":
-        run_cmd(["pnpm", "install"], cwd=project_path, timeout=300)
+        result = run_cmd(["pnpm", "install"], cwd=project_path, timeout=300)
     else:
         cmd = ["npm", "ci"] if (project_path / "package-lock.json").exists() else ["npm", "install"]
-        run_cmd(cmd, cwd=project_path, timeout=300)
+        result = run_cmd(cmd, cwd=project_path, timeout=300)
+
+    if not result.success:
+        error("Dependency installation failed")
+        return
     success("Dependencies installed")
 
     # npm build
@@ -355,22 +365,33 @@ def _setup_static_frontend(
         console.print("  [green]✓[/green] Static HTML — no build needed")
         return
 
-    # Install Node.js
+    # Install Node.js — STOP if this fails
     if not node.is_nodejs_installed():
-        node.install_nodejs(pkg_manager)
+        if not _install_nodejs_with_fallback(pkg_manager):
+            error("Node.js installation failed. Install manually: sudo apt install nodejs npm")
+            return
     else:
         console.print(f"  [green]✓[/green] Node.js — {node.get_node_version()}")
+
+    # Verify npm is available
+    if not node.is_npm_installed():
+        error("npm not found. Install manually: sudo apt install npm")
+        return
 
     # npm install
     step("Installing dependencies...")
     pkg_mgr = _detect_node_pkg_manager(project_path)
     if pkg_mgr == "yarn":
-        run_cmd(["yarn", "install"], cwd=project_path, timeout=300)
+        result = run_cmd(["yarn", "install"], cwd=project_path, timeout=300)
     elif pkg_mgr == "pnpm":
-        run_cmd(["pnpm", "install"], cwd=project_path, timeout=300)
+        result = run_cmd(["pnpm", "install"], cwd=project_path, timeout=300)
     else:
         cmd = ["npm", "ci"] if (project_path / "package-lock.json").exists() else ["npm", "install"]
-        run_cmd(cmd, cwd=project_path, timeout=300)
+        result = run_cmd(cmd, cwd=project_path, timeout=300)
+
+    if not result.success:
+        error("Dependency installation failed")
+        return
     success("Dependencies installed")
 
     # npm build
@@ -631,6 +652,37 @@ server {
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
+
+
+def _install_nodejs_with_fallback(pkg_manager) -> bool:
+    """Install Node.js with fallback methods.
+
+    Tries:
+    1. NodeSource (longer timeout)
+    2. apt install nodejs npm (simple fallback)
+
+    Returns:
+        True if Node.js was installed successfully.
+    """
+    # Try NodeSource first (with longer timeout)
+    step("Installing Node.js...")
+    if node.install_nodejs(pkg_manager):
+        return True
+
+    # Fallback: direct apt/dnf install
+    warning("NodeSource failed, trying system package...")
+    result = run_cmd(["sudo", "apt-get", "install", "-y", "nodejs", "npm"], timeout=120)
+    if result.success and node.is_nodejs_installed():
+        success(f"Node.js installed: {node.get_node_version()}")
+        return True
+
+    # Try dnf for RHEL-based
+    result = run_cmd(["sudo", "dnf", "install", "-y", "nodejs", "npm"], timeout=120)
+    if result.success and node.is_nodejs_installed():
+        success(f"Node.js installed: {node.get_node_version()}")
+        return True
+
+    return False
 
 
 def _detect_stack(project_path: Path) -> str:

@@ -49,7 +49,7 @@ def _install_nodejs_debian(pkg_manager: PackageManager, version: str) -> bool:
     result = run_cmd([
         "bash", "-c",
         f"curl -fsSL {NODESOURCE_SETUP_URL} | sudo -E bash -"
-    ], timeout=60)
+    ], timeout=120)
 
     if not result.success:
         error(f"NodeSource setup failed: {result.stderr.strip()[:200]}")
